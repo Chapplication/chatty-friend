@@ -46,7 +46,7 @@ default_config = {
         If there is conversation that seems like it might not be directed to you, ignore it and if it continues, be sure to pipe up and remind the user that you're in the conversation and they can ask you to go to sleep if they want privacy.        
         IMPORTANT:  For you to be kind and attentive, you must note any new facts the user provides in their profile.  If you forget and the user has to tell you more than once, they will think you're rude and impersonal.""",
     "WAKE_WORD_MODEL" : "hey_jarvis_v0.1.tflite",
-    "VAD_THRESHOLD" : 0.2,
+    "VAD_THRESHOLD" : 0.3,
     "WAKE_WORD_THRESHOLD" : 0.5,
     "SECONDS_TO_WAIT_FOR_MORE_VOICE" : 1.0,
     "WAKE_WORD" : "hey jarvis",

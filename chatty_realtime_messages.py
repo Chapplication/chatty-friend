@@ -13,10 +13,16 @@ import asyncio
 #
 async def send_to_assistant(ws, message):
 
-    if not ws:
-        return
+    if ws:
 
-    await ws.send(json.dumps(message))
+        try:
+            await ws.send(json.dumps(message))
+            return True
+        except Exception as e:
+            print(f"Error sending websocket message: {e}")
+            print(f"Message: {str(message)[:100]}...")
+
+    return False
 
 async def send_audio_to_assistant(ws, buffer):
     await send_to_assistant(ws,{
@@ -39,7 +45,11 @@ async def setup_assistant_session(master_state, greet_user: str = None):
     url = master_state.conman.get_config("WS_URL") + master_state.conman.get_config("REALTIME_MODEL")
     headers = {"Authorization": f"Bearer {master_state.openai.api_key}", "OpenAI-Beta": "realtime=v1"}
 
-    ws = await websockets.connect(url, additional_headers=headers, max_size=1 << 24)
+    try:
+        ws = await websockets.connect(url, additional_headers=headers, max_size=1 << 24)
+    except Exception as e:
+        print(f"Error connecting to websocket: {e}")
+        return None
 
     # Wait until server sends session.created
     async def wait_for_remote_ack(ws, event_type):
@@ -59,62 +69,61 @@ async def setup_assistant_session(master_state, greet_user: str = None):
         master_state.remote_assistant_state["session_open_time"] = time.time()
         master_state.remote_assistant_state["session_id"] = session["session"]["id"]
 
-    print("✅ session.created")
+        print("✅ session.created")
 
-    sp = master_state.conman.get_config("VOICE_ASSISTANT_SYSTEM_PROMPT")
-    if not sp:
-        sp = master_state.conman.default_config["VOICE_ASSISTANT_SYSTEM_PROMPT"]
+        sp = master_state.conman.get_config("VOICE_ASSISTANT_SYSTEM_PROMPT")
+        if not sp:
+            sp = master_state.conman.default_config["VOICE_ASSISTANT_SYSTEM_PROMPT"]
 
-    user_profile = master_state.conman.get_config("USER_PROFILE")
-    if user_profile:
-        sp += "\n\nHere are some things that they user has told you in the past.  Use them to make the conversation more interesting and personal.\n"
-        sp += "\n".join(user_profile)
+        user_profile = master_state.conman.get_config("USER_PROFILE")
+        if user_profile:
+            sp += "\n\nHere are some things that they user has told you in the past.  Use them to make the conversation more interesting and personal.\n"
+            sp += "\n".join(user_profile)
 
-    resume_context = master_state.conman.get_resume_context()
-    if resume_context:
-        sp += "\n\nYou were just talking with the user and here is some context you need to use to continue the conversation:\n"
-        sp += resume_context
+        resume_context = master_state.conman.get_resume_context()
+        if resume_context:
+            sp += "\n\nYou were just talking with the user and here is some context you need to use to continue the conversation:\n"
+            sp += resume_context
 
-    # milliseconds before remote decides to start responding... 200 is super eager, 800 is not so eager
-    etr_percent = master_state.conman.get_percent_config_as_0_to_100_int("ASSISTANT_EAGERNESS_TO_REPLY")
-    etr_ms = int(200 + (800 - 200) * (etr_percent / 100.0))
+        # milliseconds before remote decides to start responding... 200 is super eager, 800 is not so eager
+        etr_percent = master_state.conman.get_percent_config_as_0_to_100_int("ASSISTANT_EAGERNESS_TO_REPLY")
+        etr_ms = int(200 + (800 - 200) * (etr_percent / 100.0))
 
-    # Configure session
-    await send_to_assistant(ws, {
-        "type": "session.update",
-        "session": {
-            "voice": master_state.conman.get_config("VOICE"),
-            "instructions": sp,
-            "max_response_output_tokens": 1024,
-            "speed": get_speed_from_percentage_int_0_to_100(master_state.conman.get_config("SPEED")),
-            "modalities": ["audio", "text"],
-            "input_audio_format": "pcm16",
-            "output_audio_format": "pcm16",
-            "input_audio_noise_reduction": {"type":"far_field"},
-            "tools":[tool.get_model_function_call_metadata() for tool in master_state.tools_for_assistant],
-            "input_audio_transcription": {"model": master_state.conman.get_config("AUDIO_TRANSCRIPTION_MODEL")},
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": etr_ms, 
-                "create_response": True, 
-                "interrupt_response": False, # assume we are doing VAD locally on the pi; mac is push to talk
-            }
-        },
-    })
+        # Configure session
+        if await send_to_assistant(ws, {
+            "type": "session.update",
+            "session": {
+                "voice": master_state.conman.get_config("VOICE"),
+                "instructions": sp,
+                "max_response_output_tokens": 1024,
+                "speed": get_speed_from_percentage_int_0_to_100(master_state.conman.get_config("SPEED")),
+                "modalities": ["audio", "text"],
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+                "input_audio_noise_reduction": {"type":"far_field"},
+                "tools":[tool.get_model_function_call_metadata() for tool in master_state.tools_for_assistant],
+                "input_audio_transcription": {"model": master_state.conman.get_config("AUDIO_TRANSCRIPTION_MODEL")},
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": etr_ms, 
+                    "create_response": True, 
+                    "interrupt_response": False, # assume we are doing VAD locally on the pi; mac is push to talk
+                }
+            },
+        }):
+            await wait_for_remote_ack(ws, "session.updated")
 
-    await wait_for_remote_ack(ws, "session.updated")
+            print("✅ session.updated")
 
-    print("✅ session.updated")
+            master_state.ws = ws
 
-    master_state.ws = ws
+            if greet_user:
+                await send_assistant_instructions(master_state, greet_user)
 
-    if greet_user:
-        await send_assistant_instructions(master_state, greet_user)
-
-    # resturn the system prompt for the supervisor to use
-    return sp
+            # resturn the system prompt for the supervisor to use
+            return sp
 
 async def send_assistant_instructions(master_state, greet_user):
     await send_to_assistant(master_state.ws, {
@@ -129,20 +138,19 @@ async def send_assistant_instructions(master_state, greet_user):
         })
 
 async def send_assistant_text_from_system(master_state, message):
-    if True:
-        await send_to_assistant(master_state.ws, {
-                "type": "conversation.item.create",
-                "item": {
-                    "type": "message",
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": message
-                        }
-                    ]
-                }
-            })
+    await send_to_assistant(master_state.ws, {
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "system",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": message
+                    }
+                ]
+            }
+        })
     await send_to_assistant(master_state.ws, {
             "type": "response.create",
             "response": {
@@ -271,8 +279,8 @@ async def on_function_call_arguments_done(event, master_state):
         }
         
         try:
-            await send_to_assistant(master_state.ws, result_message)
-            await send_to_assistant(master_state.ws, {"type": "response.create"})
+            if await send_to_assistant(master_state.ws, result_message):
+                await send_to_assistant(master_state.ws, {"type": "response.create"})
             
         except Exception as e:
             print(f"❌ Failed to send tool call result: {e}")
