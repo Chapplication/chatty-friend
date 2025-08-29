@@ -1,0 +1,56 @@
+# Sensitive configuration files
+chatty_config.json
+chatty_secrets.json
+chatty_secrets.json.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# User data and embeddings
+chatty_embeddings.bin
+*.log
+logs/
+recordings/
+user_data/
+
+# Temporary files
+temp/
+tmp/
+
+# Audio files (if any get saved)
+*.wav
+*.mp3
+*.m4a
+
+# Python version management
+.python-version
+
+# Local deployment scripts
+chatty_push.sh
+
+# Personal documentation
+CLAUDE.md
+TODO.md

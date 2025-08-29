@@ -1,0 +1,20 @@
+[project]
+name = "chatty-friend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aioconsole>=0.8.1",
+    "beautifulsoup4>=4.13.4",
+    "feedparser>=6.0.11",
+    "jinja2>=3.1.6",
+    "openai>=1.99.7",
+    "pynput>=1.8.1",
+    "pytz>=2025.2",
+    "requests>=2.32.4",
+    "streamlit>=1.48.1",
+    "twilio>=9.7.0",
+    "websockets>=15.0.1",
+    "wikipedia>=1.4.0",
+]

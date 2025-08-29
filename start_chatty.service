@@ -1,0 +1,10 @@
+[Unit]
+After=network.target sound.target
+Requires=sound.target
+
+[Service]
+Type=forking
+ExecStart=/usr/local/bin/start_chatty.sh
+
+[Install]
+WantedBy=default.target
