@@ -81,8 +81,11 @@ class SecretsManager:
 
         # check the environment for secrets too
         for k in self.required_secrets:
-            if k in os.environ and not self.secrets.get(k):
-                self.secrets[k] = os.environ[k]
+            if not self.secrets.get(k):
+                if k in os.environ:
+                    self.secrets[k] = os.environ[k]
+                elif k.upper() in os.environ:
+                    self.secrets[k] = os.environ[k.upper()]
         
     def load_secrets(self) -> bool:
         """Load secrets from JSON file"""
