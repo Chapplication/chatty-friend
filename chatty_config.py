@@ -45,11 +45,11 @@ default_config = {
         If you get a short utterance from the user in a language that has not been part of the conversation, ignore it because it is probably a misunderstanding.  Ask for a clarification in the language that the user normally uses if you are not sure.
         If there is conversation that seems like it might not be directed to you, ignore it and if it continues, be sure to pipe up and remind the user that you're in the conversation and they can ask you to go to sleep if they want privacy.        
         IMPORTANT:  For you to be kind and attentive, you must note any new facts the user provides in their profile.  If you forget and the user has to tell you more than once, they will think you're rude and impersonal.""",
-    "WAKE_WORD_MODEL" : "hey_jarvis_v0.1.tflite",
+    "WAKE_WORD_MODEL" : "amanda",
+    "WAKE_WORD_MODEL_CHOICES" : ["amanda", "oliver"],
     "VAD_THRESHOLD" : 0.3,
     "WAKE_WORD_THRESHOLD" : 0.5,
     "SECONDS_TO_WAIT_FOR_MORE_VOICE" : 1.0,
-    "WAKE_WORD" : "hey jarvis",
     "CONFIG_PASSWORD" : "assistant",
     "CONFIG_PASSWORD_HINT": "assistant",
     "USER_PROFILE" : [],
@@ -258,6 +258,20 @@ class ConfigManager:
             return True
         except:
             pass
+
+    def get_wake_word_model(self) -> str:
+        # its really bad if we don't have a wake word - silent fail of headless device!
+        # load the current wake word model.  if not configured or there's no such model, use the first value in the list that is found
+        candidates =[self.get_config("WAKE_WORD_MODEL")]+([] if not self.get_config("WAKE_WORD_MODEL_CHOICES") or not isinstance(self.get_config("WAKE_WORD_MODEL_CHOICES"), list) else self.get_config("WAKE_WORD_MODEL_CHOICES"))+["amanda","oliver"]
+        winner = None
+        for candidate in candidates:
+            try:
+                if os.path.exists("./"+candidate+".tflite") or os.path.exists("./"+candidate+".onnx"):
+                    winner = candidate
+                    break
+            except:
+                pass
+        return winner
 
     def get_voice(self) -> Optional[int]:
         """Get the current voice"""

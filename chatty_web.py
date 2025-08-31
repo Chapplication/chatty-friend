@@ -70,7 +70,6 @@ Provide a button to revert to the original secrets.json file.  require the user 
 - voice tech - include a button that opens a modal and allows configuration of the voice tech parameters.  Warn user not to edit if they don't know what they're doing.
     "VAD_THRESHOLD" : float, don't allow below 0.2 or above 0.5
     "WAKE_WORD_THRESHOLD" : float, don't allow below 0.4 or above 0.9
-    "WAKE_WORD" : string
 
 
 include a "restart" button that will restart the chatty application. when clicked by calling sudo reboot on pi only.  on mac, it is ignored.
@@ -436,7 +435,7 @@ else:  # Configuration stage
                 config_updates.update({
                     'USER_NAME': st.session_state.get('user_name', 'User'),
                     'TIME_ZONE': st.session_state.get('time_zone', '') or None,
-                    'VOICE': st.session_state.get('profile_voice', 'alloy'),
+                    'WAKE_WORD_MODEL': st.session_state.get('profile_wake_word', 'amanda'),
                     'SPEED': st.session_state.get('profile_speed', 60),
                     'VOLUME': st.session_state.get('profile_volume', 50),
                     'MAX_PROFILE_ENTRIES': st.session_state.get('max_profile_entries', 100),
@@ -556,7 +555,7 @@ else:  # Configuration stage
                     # Cancel any changes by clearing relevant session state keys
                     old_section = st.session_state.current_section
                     section_keys = {
-                        'basic': ['user_name', 'time_zone', 'profile_voice', 'profile_speed', 'profile_volume', 
+                        'basic': ['user_name', 'time_zone', 'profile_wake_word', 'profile_speed', 'profile_volume', 
                                  'max_profile_entries', 'seconds_to_wait', 'eagerness', 'sleep_time', 'initial_basic_values'],
                         'user_profile': ['modal_user_profile', 'original_user_profile', 'new_profile_entry'],
                         'notes': ['modal_notes', 'new_note_entry'],
@@ -607,7 +606,7 @@ else:  # Configuration stage
                 
                 # Define keys to clear for each section
                 section_keys = {
-                    'basic': ['user_name', 'time_zone', 'profile_voice', 'profile_speed', 'profile_volume', 
+                    'basic': ['user_name', 'time_zone', 'profile_wake_word', 'profile_speed', 'profile_volume', 
                              'max_profile_entries', 'seconds_to_wait', 'eagerness', 'sleep_time', 'initial_basic_values'],
                     'user_profile': ['modal_user_profile', 'original_user_profile', 'new_profile_entry'],
                     'notes': ['modal_notes', 'new_note_entry'],
@@ -680,7 +679,7 @@ else:  # Configuration stage
             st.session_state.initial_basic_values = {
                 'user_name': st.session_state.config_manager.get_config('USER_NAME') or "User",
                 'time_zone': st.session_state.config_manager.get_config('TIME_ZONE') or '',
-                'voice': st.session_state.config_manager.get_config('VOICE') or 'alloy',
+                'wake_word': st.session_state.config_manager.get_config('WAKE_WORD_MODEL') or 'amanda',
                 'speed': st.session_state.config_manager.get_percent_config_as_0_to_100_int('SPEED') or 60,
                 'volume': st.session_state.config_manager.get_percent_config_as_0_to_100_int('VOLUME') or 50,
                 'max_entries': st.session_state.config_manager.get_config('MAX_PROFILE_ENTRIES') or 100,
@@ -712,14 +711,14 @@ else:  # Configuration stage
         )
         
         # Voice settings
-        voice_choices = st.session_state.config_manager.get_config('VOICE_CHOICES') or default_config['VOICE_CHOICES']
-        voice_index = voice_choices.index(initial_values['voice']) if initial_values['voice'] in voice_choices else 0
+        wake_word_choices = st.session_state.config_manager.get_config('WAKE_WORD_MODEL_CHOICES') or default_config['WAKE_WORD_MODEL_CHOICES']
+        wake_word_index = wake_word_choices.index(initial_values['wake_word']) if initial_values['wake_word'] in wake_word_choices else 0
         
         voice = st.selectbox(
-            "Assistant Voice",
-            options=voice_choices,
-            index=voice_index,
-            key="profile_voice",
+            "Assistant Name (Wake Word) !! Changes Take Effect After Save and Restart !!",
+            options=wake_word_choices,
+            index=wake_word_index,
+            key="profile_wake_word",
             on_change=lambda: lock_section() if not st.session_state.section_locked else None
         )
         

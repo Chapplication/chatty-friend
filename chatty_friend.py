@@ -97,6 +97,9 @@ async def assistant_go_live():
 
     master_state = ChattyMasterState()
 
+    import os
+    os.system("espeak -v en-us -a 20 'Chatty Friend is named " + master_state.conman.get_config("WAKE_WORD_MODEL") + "'")
+
     is_automated_restart_after_summary = False
 
     while loop_forever:

@@ -34,7 +34,7 @@ ping -c 4 google.com
 ### 🔇 "Chatty Friend doesn't respond to wake word"
 
 **Symptoms:** 
-- Hear intial tones but no response when saying "Hey Jarvis"
+- Hear intial tones but no response when saying "Amanda" or "Oliver"
 
 **Solutions:**
 

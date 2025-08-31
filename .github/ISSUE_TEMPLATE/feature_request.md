@@ -21,7 +21,7 @@ A clear and concise description of any alternative solutions or features you've 
 
 **Example use case**
 Provide a realistic scenario where this feature would be used:
-- User says: "Hey Jarvis..."
+- User says: "Amanda..." or "Oliver..."
 - Chatty Friend responds: "..."
 - Result: ...
 

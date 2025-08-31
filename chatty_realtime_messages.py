@@ -91,6 +91,10 @@ async def setup_assistant_session(master_state, greet_user: str = None):
             sp += "\n\nYou were just talking with the user and here is some context you need to use to continue the conversation:\n"
             sp += resume_context
 
+        user_name_for_assistant = master_state.conman.get_config("WAKE_WORD_MODEL")
+        if user_name_for_assistant:
+            sp += "\n\nYou are named " + user_name_for_assistant + ".  The user will call you this name and you can tell the user that is your name too.\n"
+
         # milliseconds before remote decides to start responding... 200 is super eager, 800 is not so eager
         etr_percent = master_state.conman.get_percent_config_as_0_to_100_int("ASSISTANT_EAGERNESS_TO_REPLY")
         etr_ms = int(200 + (800 - 200) * (etr_percent / 100.0))

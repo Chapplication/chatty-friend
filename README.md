@@ -18,7 +18,7 @@ or by updating the code but the cost is significantly higher.
 
 **Key Features:**
 - 🍓 Simple smartspeaker deployment to senior citizen living evironment on Raspberry Pi (no phone/mac/tablet/laptop needed)
-- 🗣️ Natural voice conversations with "Hey Jarvis" wake word (customizable)
+- 🗣️ Natural voice conversations with wake word ("Amanda" or "Oliver")
 - 👥 Primary contact system with email summaries and SMS escalations (requires Twilio config)
 - 🌐 Web-based configuration interface (mobile-friendly)
 - 🛠️ Extensible tool system (weather, news, search, and more)
@@ -275,7 +275,7 @@ On Raspberry Pi, sessions automatically timeout after 10 minutes of inactivity, 
 
 ### Wake Word Configuration
 
-The default wake word is "Hey Jarvis" but can be customized using [OpenWakeWord](https://github.com/dscripka/openWakeWord). To train a custom wake word:
+The default wake word is "Amanda" but can be customized using [OpenWakeWord](https://github.com/dscripka/openWakeWord). To train a custom wake word:
 
 1. Follow the [OpenWakeWord training guide](https://github.com/dscripka/openWakeWord#training-custom-models)
 2. Generate your custom `.tflite` model
@@ -319,7 +319,7 @@ The architecture evolves through layers of complexity, starting simple and addin
      └──────┘         │                     │         └─────────────┘         └─────────┘
                       │ 🔒 Local Processing │                                      
                       │ Nothing sent until  │                                      
-                      │ "Hey Jarvis" heard  │               
+                      │ "Amanda" heard      │               
                       └─────────────────────┘
 ```
 
@@ -337,7 +337,7 @@ The architecture evolves through layers of complexity, starting simple and addin
      │      │ [voice] │   Detector          │[voice]  │ Friend      │ [audio] │         │
      └──────┘         │                     │         └─────────────┘         └─────────┘
                       │ 🔒 Local Processing │              
-                      │ "Hey Jarvis" → Open │              
+                      │ "Amanda" → Open     │              
                       │ Otherwise → Silent  │              
                       └─────────────────────┘
 ```
@@ -441,7 +441,7 @@ The architecture evolves through layers of complexity, starting simple and addin
 
 ### Key Architecture Principles
 
-- **Privacy First**: Nothing leaves the device until "Hey Jarvis" is detected
+- **Privacy First**: Nothing leaves the device until "Amanda" or "Oliver" (as configured) is detected
 - **Local Processing**: Wake word detection and VAD run entirely on-device  
 - **Cloud Intelligence**: Only activated conversations use OpenAI's real-time API
 - **Tool Extensibility**: Modular system for adding weather, news, search, etc.

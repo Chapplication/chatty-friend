@@ -25,19 +25,25 @@ class WakeWordDetector:
         self.wake_to_wake_min_time = 5.0
         self.master_state = master_state
 
-        if OpenWakewordModel and master_state.conman.get_config("WAKE_WORD_MODEL"):
-
-            try:                
-                self.model = OpenWakewordModel(wakeword_models=[master_state.conman.get_config("WAKE_WORD_MODEL")], vad_threshold=master_state.conman.get_config("VAD_THRESHOLD"))
-                print("✅ OpenWakeWord model loaded - first try")
-            except Exception as e:
+        wake_word_model = master_state.conman.get_wake_word_model()
+        if OpenWakewordModel and wake_word_model:
+            oww = None
+            base_assistant_name = master_state.conman.get_config("WAKE_WORD_MODEL").rsplit(".",1)[0]
+            for extension in [".tflite", ".onnx"]:
                 try:
-                    from importlib import resources
-                    with resources.path('openwakeword.resources.models', master_state.conman.get_config("WAKE_WORD_MODEL")) as file_path:
-                        self.model = OpenWakewordModel([str(file_path)], vad_threshold=master_state.conman.get_config("VAD_THRESHOLD"))
-                        print("✅ OpenWakeWord model loaded - second try")
+                    wake_word_file = "./"+base_assistant_name + extension
+                    print("Trying to load OpenWakeWord model: "+wake_word_file)
+                    oww = OpenWakewordModel(wakeword_models=[wake_word_file], vad_threshold=master_state.conman.get_config("VAD_THRESHOLD"))
+                    break
                 except Exception as e:
-                    print(f"Wake Word Model Load attempts exhausted: {e}")
+                    print(f"OpenWakeWord exception: {e}")
+                    pass
+            if oww:
+                print("✅ OpenWakeWord model loaded")
+                self.model = oww
+            else:
+                print(f"❌ Failed to load OpenWakeWord model")
+                self.model = None
 
         # default to active if no model
         self.last_wake_word_detected = None
@@ -106,7 +112,7 @@ async def mic_listener(manager: AsyncManager) -> None:
         #  not testing - we're live... require wake word
         mic_is_live_to_assistant = False
         user_is_speaking = False
-        print("💤 Say '"+manager.master_state.conman.get_config("WAKE_WORD")+"' to start")
+        print("💤 Say '"+manager.master_state.conman.get_wake_word_model()+"' to start")
 
     last_voice_activity_time = None
     should_exit = False

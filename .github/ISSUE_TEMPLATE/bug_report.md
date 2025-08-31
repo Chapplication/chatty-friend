@@ -12,7 +12,7 @@ A clear and concise description of what the bug is.
 
 **To Reproduce**
 Steps to reproduce the behavior:
-1. Say wake word "Hey Jarvis"
+1. Say wake word "Amanda" or "Oliver"
 2. Ask '...'
 3. Observe '...'
 4. See error
