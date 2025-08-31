@@ -21,7 +21,7 @@ voice_choices = {
 
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {
-    "REALTIME_MODEL" : "gpt-4o-mini-realtime-preview",
+    "REALTIME_MODEL" : "gpt-realtime",
     "AUDIO_TRANSCRIPTION_MODEL" : "gpt-4o-mini-transcribe",
     "EMBEDDING_MODEL" : "text-embedding-3-small",
     "SUPERVISOR_MODEL" : "gpt-5-mini",
@@ -61,14 +61,14 @@ default_config = {
     "CONTACTS":[], 
     "USER_NAME": "User",
     "ASSISTANT_EAGERNESS_TO_REPLY" : 50, # 0-100
-    "AUTO_SUMMARIZE_EVERY_N_MESSAGES" : 20,
-    "MAX_PROFILE_ENTRIES" : 100,
+    "AUTO_SUMMARIZE_EVERY_N_MESSAGES" : 100,
+    "MAX_PROFILE_ENTRIES" : 1000,
     "WIFI_SSID" : None,
     "WIFI_PASSWORD" : None,
     "WIFI_KNOWN_CONNECTION": {},
     "TIME_ZONE" : None,
     "SUPERVISOR_INSTRUCTIONS" : None,
-    "VERSION" : "0.1.0",
+    "VERSION" : "0.1.1",
 }
 default_config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in voice_choices else voice_choices[voice_choices.keys()[0]]
 

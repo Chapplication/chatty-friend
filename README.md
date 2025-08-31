@@ -17,7 +17,7 @@ because it has a cost effective profile.  OpenAI's latest "gpt-realtime" model c
 or by updating the code but the cost is significantly higher.
 
 **Key Features:**
-- 🍓 Simple smarspeaker deployment to senior citizen living evironment on Raspberry Pi
+- 🍓 Simple smartspeaker deployment to senior citizen living evironment on Raspberry Pi (no phone/mac/tablet/laptop needed)
 - 🗣️ Natural voice conversations with "Hey Jarvis" wake word (customizable)
 - 👥 Primary contact system with email summaries and SMS escalations (requires Twilio config)
 - 🌐 Web-based configuration interface (mobile-friendly)
@@ -26,8 +26,8 @@ or by updating the code but the cost is significantly higher.
 - runs on MacOS during development
 
 **Whats Different:**
-There are a lot of demos of OpenAI realtime.  Here's what's unique:
-- Runs completely offline until user says the wake phrase
+There are a lot of OpenAI realtime projects on github.  Here's what's unique:
+- Private - No cloud communication until the user says the wake phrase.  No cost, nothing shared.
 - Dialog is fluid and engaging until user dismisses the friend (or timeout happens)
 - Smoothly handles interruptions, talking-over, and slow speakers, etc.
 - Gets news, web searches, wiki entries, weather, time, etc. 
@@ -57,21 +57,39 @@ Coming soon: Learn more at [chattyfriend.com](https://chattyfriend.com)
 
 ## 🚀 Quick Start (macOS Development)
 
-Get Chatty Friend running in 6 simple steps:
+Get Chatty Friend running in QA/test mode on mac quickly:
 
 1. **Clone and sync**
    ```bash
    git clone https://github.com/Chapplication/chatty-friend.git
-   cd chatty_friend
+   cd chatty-friend
+
+2. **Sync with uv**
+   ```bash
+   uv --version
+   ```
+   if you get an error from that, 
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+   THEN CLOSE THE TERMINAL WINDOW AND RE-OPEN
+   Finally,
+   ```bash
    uv sync
    ```
 
-2. **Set your OpenAI API key**
+3. **Set your OpenAI API key**
    ```bash
    export CHAT_API_KEY="sk-proj-your-openai-api-key-here"
    ```
 
-3. **Run Chatty Friend**
+4. **Open the Config Web Page**
+   ```bash
+   uv run python -m streamlit run chatty_web.py
+   ```
+   Review and configure various options (see Config Guide)
+
+5. **Run Chatty Friend**
    ```bash
    python chatty_friend.py
    ```
@@ -85,7 +103,6 @@ Get Chatty Friend running in 6 simple steps:
 ### Next Steps
 
 - **Configure additional tools**: Add weather, news, and search API keys
-- **Try the web interface**: `uv run streamlit run chatty_web.py` 
 - **Customize personality**: Set voice, speed, volume, and system prompts
 - **Set up contacts**: Configure primary contacts for summaries and escalations
 
@@ -133,7 +150,116 @@ The web interface allows configuration of:
 - 🔑 API keys for additional services
 - 🗣️ Voice settings
 
-Cold-start on the Pi:
+# Configuration Guide
+
+The Chatty Friend configuration interface provides a comprehensive way to customize your AI assistant. Access the configuration by running the web interface with `uv run streamlit run chatty_web.py`.
+
+## Configuration Sections
+
+### 👤 Basic Settings
+Configure fundamental user and voice settings:
+- **Name** - The user's name that Chatty will use in conversations
+- **Time Zone** - Set your local timezone for accurate time-based interactions
+- **Assistant Voice** - Choose from available voice options (alloy, echo, fable, onyx, nova, shimmer)
+- **Speech Speed** - Control how fast Chatty speaks (0-100, lower = slower)
+- **Speech Volume** - Control Chatty's speaking volume (0-100, lower = quieter)
+- **Max Profile Entries** - Maximum number of biographical entries allowed (10-10,000)
+- **Seconds to Wait for More Voice** - How long Chatty waits for you to continue speaking (0.1-5.0 seconds)
+- **Assistant Eagerness to Reply** - How quickly Chatty jumps into conversation (0=very eager, 100=patient)
+- **Auto Sleep Time** - Seconds of inactivity before Chatty goes to sleep (60-7200)
+
+### 📝 What Chatty Knows About You
+Manage biographical information that helps Chatty understand the user better:
+- Add short paragraphs or sentences about the user
+- Edit existing entries
+- Delete individual entries or clear all
+- Each entry helps Chatty provide more personalized interactions
+
+### 📋 Supervisory Notes
+Pre-escalation notes from the AI supervisor that monitors conversations:
+- View observations made by the supervisor AI
+- Add important notes about user care
+- Edit or delete existing notes
+- These notes inform future supervision decisions
+
+### 👥 Contacts that Chatty can Reach
+Manage contacts for summaries and escalations:
+- **Name** - Contact's full name
+- **Type** - Primary (receives summaries) or Other
+- **Email** - Valid email address for notifications
+- **Phone** - Phone number with country code
+- Add, edit, or delete contacts as needed
+
+### 🔑 Password
+Security settings for the configuration interface:
+- Set a new password for accessing configuration
+- Add a password hint for recovery
+- Primary contacts can request password resets via email (if configured)
+
+### 👥 Supervisor Setup
+Configure the AI supervisor that reviews conversations:
+- **Auto Summarize Every N Messages** - Frequency of intermediate conversation summaries (1-100)
+- **Supervisor Instructions** - Custom instructions for what the supervisor should watch for and include in reports
+
+### 📡 WiFi (Raspberry Pi only)
+Network configuration for Raspberry Pi devices:
+- View current WiFi connection
+- Change WiFi network (requires restart)
+- Automatically manages hotspot mode if connection fails
+
+### 🤖 AI Settings
+Advanced AI model configuration:
+- **Realtime Model** - The main conversational AI model
+- **Audio Transcription Model** - Model for converting speech to text
+- **Supervisor Model** - Model used for conversation supervision
+- **WebSocket URL** - Connection endpoint for real-time communication
+
+### 🎭 Chatty Personality
+Customize how Chatty interacts:
+- **System Prompt** - Core instructions that define Chatty's behavior and personality
+- **Voice Settings** - Fine-tune voice, volume, and speed
+- **Assistant Eagerness** - Response timing preferences
+
+### 📰 Chatty Content Settings
+Configure content sources:
+- **News Provider** - Select from available news sources (BBC, CNN, NPR, etc.)
+
+### 🔧 Voice Technical Config
+Advanced voice detection settings:
+- **Voice Activity Detection Threshold** - Sensitivity for detecting speech (0.2-0.5)
+- **Wake Word Detection Threshold** - Sensitivity for wake word recognition (0.4-0.9)
+- **Seconds to Wait for More Voice** - Pause duration before processing speech
+
+### 🔐 Secrets
+Manage API keys and sensitive data:
+- View configured/unconfigured API keys
+- Update secrets in JSON format
+- Keys are hidden for security
+
+### 💀 DANGER! Reset
+System management options:
+- Reset all configuration to defaults (preserves passwords and secrets)
+- Restart system (Raspberry Pi only)
+
+## Navigation
+
+The interface uses a locked-section approach:
+- Click any section in the left sidebar to view it
+- When you make changes, the section locks automatically
+- Use the **Save Changes** or **Cancel Changes** buttons to commit or discard edits
+- You cannot switch sections while editing - save or cancel first
+
+## Platform Differences
+
+- **Mac**: Network and restart features are disabled
+- **Raspberry Pi**: Full functionality including WiFi management and system restart
+
+## Session Security
+
+On Raspberry Pi, sessions automatically timeout after 10 minutes of inactivity, requiring re-authentication.
+
+
+### Cold-start on the Pi:
 - install chatty friend using the Pi image instructions (see deployment instructions below)
 - boot the Pi and attach to the hotspot it provides using the chatty_friend SSID (password 'assistant')
 - point your browser to 10.42.0.1 and configure:

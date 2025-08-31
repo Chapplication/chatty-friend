@@ -45,11 +45,17 @@ async def setup_assistant_session(master_state, greet_user: str = None):
     url = master_state.conman.get_config("WS_URL") + master_state.conman.get_config("REALTIME_MODEL")
     headers = {"Authorization": f"Bearer {master_state.openai.api_key}", "OpenAI-Beta": "realtime=v1"}
 
-    try:
-        ws = await websockets.connect(url, additional_headers=headers, max_size=1 << 24)
-    except Exception as e:
-        print(f"Error connecting to websocket: {e}")
-        return None
+    ws = None
+    for retries in range(10):
+        try:
+            ws = await websockets.connect(url, additional_headers=headers, max_size=1 << 24)
+            break
+        except Exception as e:
+            print(f"Error connecting to websocket: {e}")
+            await asyncio.sleep(1)
+
+    if not ws:
+        raise Exception("❌ Failed to connect to websocket")
 
     # Wait until server sends session.created
     async def wait_for_remote_ack(ws, event_type):

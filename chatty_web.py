@@ -94,7 +94,6 @@ from datetime import datetime
 from chatty_config import ConfigManager, default_config, CONTACT_TYPE_PRIMARY_SUPERVISOR
 from chatty_secrets import SecretsManager
 from tools.news_service import RSS_NEWS_FEEDS
-from chatty_communications import chatty_send_email
 import pytz
 from chatty_wifi import IS_PI, IS_MAC, is_online, start_hotspot_mode, connect_to_wifi
 
@@ -193,6 +192,7 @@ If you did not request this password reset, please contact your administrator.
 Best regards,
 Chatty Friend System"""
         
+        from chatty_communications import chatty_send_email
         await chatty_send_email(mock_state, primary_contact['email'], subject, message)
         return True, f"New password sent to {primary_contact['email']}"
         
