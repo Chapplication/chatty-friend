@@ -34,6 +34,9 @@ async def speaker_player(manager: AsyncManager) -> None:
         # frame_count is the number of frames requested
         # We need to return audio data as bytes
 
+        if status:
+            print(f"*** Speaker callback status: {status}")
+
         nonlocal unused_buffer
 
         # peek in the output queue to see how many buffers we can use
@@ -89,6 +92,7 @@ async def speaker_player(manager: AsyncManager) -> None:
 
     def stop_speaker_stream(speaker_stream):
         if speaker_stream:
+            print("🔈 Stopping speaker stream")
             speaker_stream.stop_stream()
             speaker_stream.close()
         return None

@@ -15,9 +15,22 @@ def get_current_date_string(with_time=False):
 OPENAI_SESSION_HARD_LIMIT_SECONDS = 30*60
 
 voice_choices = {
-    "gpt-realtime":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar'],
-    "gpt-4o-mini-realtime-preview":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'],
+    "gpt-realtime":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar']
 }
+
+# https://platform.openai.com/docs/pricing#audio-tokens Aug 28 2025
+cost_sheet_per_million = {
+    "gpt-realtime": {
+        "per_input_text_token": 4.0,
+        "per_input_text_token_cached": 0.4,
+        "per_input_audio_token": 32.0,
+        "per_input_audio_token_cached": 32.0,
+        "per_output_text_token": 16,
+        "per_output_audio_token": 64
+    }
+}
+
+
 
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {
@@ -70,7 +83,8 @@ default_config = {
     "SUPERVISOR_INSTRUCTIONS" : None,
     "VERSION" : "0.1.1",
 }
-default_config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in voice_choices else voice_choices[voice_choices.keys()[0]]
+default_config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in voice_choices else voice_choices[list(voice_choices.keys())[0]]
+default_config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in cost_sheet_per_million else cost_sheet_per_million[list(cost_sheet_per_million.keys())[0]]
 
 CONTACT_TYPE_PRIMARY_SUPERVISOR = "primary"
 CONTACT_TYPE_OTHER = "other"
@@ -201,6 +215,15 @@ class ConfigManager:
                         print(f"Warning: {self.config_file} should contain a JSON dict object")
                         return False
                 print(f"Loaded config from {self.config_file}")
+
+                # align existing settings after upgrade - make sure the model is still supported
+                if "REALTIME_MODEL" not in self.config or self.config["REALTIME_MODEL"] not in default_config["VOICE_CHOICES"]:
+                    self.config["REALTIME_MODEL"] = default_config["REALTIME_MODEL"]
+
+                # set voice choices to the ones the model supports
+                self.config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]]
+                self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[default_config["REALTIME_MODEL"]]
+
                 return True
             else:
                 print(f"Config file {self.config_file} not found")

@@ -43,12 +43,17 @@ def get_speed_from_percentage_int_0_to_100(speed):
 async def setup_assistant_session(master_state, greet_user: str = None):
 
     url = master_state.conman.get_config("WS_URL") + master_state.conman.get_config("REALTIME_MODEL")
-    headers = {"Authorization": f"Bearer {master_state.openai.api_key}", "OpenAI-Beta": "realtime=v1"}
+    headers = {"Authorization": f"Bearer {master_state.openai.api_key}"}#, "OpenAI-Beta": "realtime=v1"}
 
     ws = None
     for retries in range(10):
         try:
-            ws = await websockets.connect(url, additional_headers=headers, max_size=1 << 24)
+            ws = await websockets.connect(url, 
+                                          additional_headers=headers, 
+                                          max_size      = 1 << 24)#,
+                                          #ping_interval = 30,
+                                          #ping_timeout  = 20,
+                                          #close_timeout = 20)
             break
         except Exception as e:
             print(f"Error connecting to websocket: {e}")
@@ -63,19 +68,20 @@ async def setup_assistant_session(master_state, greet_user: str = None):
         while True:
             msg = await ws.recv()
             event = json.loads(msg)
+
             if event["type"] == event_type:
                 return event
             await asyncio.sleep(0.1)
             deadman -= 1
             if deadman < 0:
-                raise Exception("❌ Timeout waiting for session.created")
+                raise Exception("❌ Timeout waiting for "+str(event_type))
 
     session = await wait_for_remote_ack(ws, "session.created")
     if session:
         master_state.remote_assistant_state["session_open_time"] = time.time()
         master_state.remote_assistant_state["session_id"] = session["session"]["id"]
 
-        print("✅ session.created")
+        print("✅ session.created "+str(session["session"]["id"]))
 
         sp = master_state.conman.get_config("VOICE_ASSISTANT_SYSTEM_PROMPT")
         if not sp:
@@ -99,31 +105,54 @@ async def setup_assistant_session(master_state, greet_user: str = None):
         etr_percent = master_state.conman.get_percent_config_as_0_to_100_int("ASSISTANT_EAGERNESS_TO_REPLY")
         etr_ms = int(200 + (800 - 200) * (etr_percent / 100.0))
 
-        # Configure session
-        if await send_to_assistant(ws, {
+        session_update_message = {
             "type": "session.update",
             "session": {
-                "voice": master_state.conman.get_config("VOICE"),
+                "type": "realtime",
+                "model": master_state.conman.get_config("REALTIME_MODEL"),
+                "audio": {
+                    "input": {
+                        "format": {          
+                            "type": "audio/pcm",
+                            "rate": 24000
+                        },
+                        "noise_reduction": {"type":"far_field"},
+                        "transcription": {
+                            "model": master_state.conman.get_config("AUDIO_TRANSCRIPTION_MODEL")
+                            },
+                        "turn_detection": {
+                            "create_response": True,
+                            #"eagerness": "high" if etr_ms <= 200 else "auto" if etr_ms <= 800 else "low",
+                            "interrupt_response": False, # assume we are doing VAD locally on the pi; mac is push to talk
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": etr_ms,
+                            "threshold": 0.5,
+                            "type": "server_vad"
+                            }
+                        },
+                    "output": {
+                        "format": {
+                            "type": "audio/pcm",
+                            "rate": 24000
+                        },
+                        "speed":get_speed_from_percentage_int_0_to_100(master_state.conman.get_config("SPEED")),
+                        "voice": master_state.conman.get_config("VOICE"),
+                    }
+                },
                 "instructions": sp,
-                "max_response_output_tokens": 1024,
-                "speed": get_speed_from_percentage_int_0_to_100(master_state.conman.get_config("SPEED")),
-                "modalities": ["audio", "text"],
-                "input_audio_format": "pcm16",
-                "output_audio_format": "pcm16",
-                "input_audio_noise_reduction": {"type":"far_field"},
+                "max_output_tokens": 1024,
+                "output_modalities": ["audio"],
+                # "temperature": 0.8,Failing as of sept 1 2025
+                "tool_choice": "auto",
                 "tools":[tool.get_model_function_call_metadata() for tool in master_state.tools_for_assistant],
-                "input_audio_transcription": {"model": master_state.conman.get_config("AUDIO_TRANSCRIPTION_MODEL")},
-                "turn_detection": {
-                    "type": "server_vad",
-                    "threshold": 0.5,
-                    "prefix_padding_ms": 300,
-                    "silence_duration_ms": etr_ms, 
-                    "create_response": True, 
-                    "interrupt_response": False, # assume we are doing VAD locally on the pi; mac is push to talk
-                }
-            },
-        }):
-            await wait_for_remote_ack(ws, "session.updated")
+                "tracing": None,
+                "truncation":"auto"
+            }
+        }
+
+        # Configure session
+        if await send_to_assistant(ws, session_update_message):
+            response = await wait_for_remote_ack(ws, "session.updated")
 
             print("✅ session.updated")
 
@@ -139,11 +168,19 @@ async def send_assistant_instructions(master_state, greet_user):
     await send_to_assistant(master_state.ws, {
             "type": "response.create",
             "response": {
-                "modalities": ["audio","text"],
+                "conversation":"auto",
                 "instructions": greet_user,
-                "voice": master_state.conman.get_config("VOICE"),
-                "output_audio_format": "pcm16",
-                "max_output_tokens": 64
+                "max_output_tokens": 128,
+                "output_modalities": ["audio"],
+                "audio": {
+                    "output": {
+                        "format": {
+                            "type": "audio/pcm",
+                            "rate": 24000
+                        },
+                        "voice": master_state.conman.get_config("VOICE"),
+                    }
+                }
             }
         })
 
@@ -200,58 +237,39 @@ async def assistant_session_cancel_audio(master_state):
 
 async def on_assistant_response_done(event, master_state):
     """ Digest events to collect usage and estimate costs. """
-    usage = event.get("response",{}).get("usage",{})
 
-    # https://platform.openai.com/docs/pricing#audio-tokens Aug 28 2025
-    ONE_MILLION = 1_000_000
-    cost_sheet_per_million = {
-        "gpt-realtime": {
-            "per_input_text_token": 4.0,
-            "per_input_text_token_cached": 0.4,
-            "per_input_audio_token": 32.0,
-            "per_input_audio_token_cached": 32.0,
-            "per_output_text_token": 16,
-            "per_output_audio_token": 64,
-        },
-        "gpt-4o-mini-realtime-preview": {
-            "per_input_text_token": 0.6,
-            "per_input_text_token_cached": 0.3,
-            "per_input_audio_token": 10,
-            "per_input_audio_token_cached": 0.3,
-            "per_output_text_token": 2.4,
-            "per_output_audio_token": 20,
-        }
-    }
+    try:
+        usage = event.get("response",{}).get("usage",{})
 
-    active_model = master_state.conman.get_config("REALTIME_MODEL")
+        ONE_MILLION = 1_000_000
 
-    # if the model is not in the cost sheet, use the first model in the sheet... UGH estimate
-    if active_model not in cost_sheet_per_million:
-        active_model = cost_sheet_per_million.keys()[0]
+        cost_sheet_per_million = master_state.conman.get_config("TOKEN_COST_PER_MILLION")
 
-    per_input_text_token = cost_sheet_per_million[active_model]["per_input_text_token"] / ONE_MILLION
-    per_input_text_token_cached = cost_sheet_per_million[active_model]["per_input_text_token_cached"] / ONE_MILLION
-    per_input_audio_token = cost_sheet_per_million[active_model]["per_input_audio_token"] / ONE_MILLION
-    per_input_audio_token_cached = cost_sheet_per_million[active_model]["per_input_audio_token_cached"] / ONE_MILLION
-    per_output_text_token = cost_sheet_per_million[active_model]["per_output_text_token"] / ONE_MILLION
-    per_output_audio_token = cost_sheet_per_million[active_model]["per_output_audio_token"] / ONE_MILLION
+        per_input_text_token = cost_sheet_per_million["per_input_text_token"] / ONE_MILLION
+        per_input_text_token_cached = cost_sheet_per_million["per_input_text_token_cached"] / ONE_MILLION
+        per_input_audio_token = cost_sheet_per_million["per_input_audio_token"] / ONE_MILLION
+        per_input_audio_token_cached = cost_sheet_per_million["per_input_audio_token_cached"] / ONE_MILLION
+        per_output_text_token = cost_sheet_per_million["per_output_text_token"] / ONE_MILLION
+        per_output_audio_token = cost_sheet_per_million["per_output_audio_token"] / ONE_MILLION
 
-    response_cost = 0
+        response_cost = 0
 
-    response_cost += usage.get("input_token_details",{}).get("text_tokens",0) * per_input_text_token
-    response_cost += usage.get("input_token_details",{}).get("audio_tokens",0) * per_input_audio_token
-    response_cost += usage.get("input_token_details",{}).get("cached_tokens_details",{}).get("text_tokens",0) * per_input_text_token_cached
-    response_cost += usage.get("input_token_details",{}).get("cached_tokens_details",{}).get("audio_tokens",0) * per_input_audio_token_cached
+        response_cost += usage.get("input_token_details",{}).get("text_tokens",0) * per_input_text_token
+        response_cost += usage.get("input_token_details",{}).get("audio_tokens",0) * per_input_audio_token
+        response_cost += usage.get("input_token_details",{}).get("cached_tokens_details",{}).get("text_tokens",0) * per_input_text_token_cached
+        response_cost += usage.get("input_token_details",{}).get("cached_tokens_details",{}).get("audio_tokens",0) * per_input_audio_token_cached
 
-    response_cost += usage.get("output_token_details",{}).get("text_tokens",0) * per_output_text_token
-    response_cost += usage.get("output_token_details",{}).get("audio_tokens",0) * per_output_audio_token
+        response_cost += usage.get("output_token_details",{}).get("text_tokens",0) * per_output_text_token
+        response_cost += usage.get("output_token_details",{}).get("audio_tokens",0) * per_output_audio_token
 
-    master_state.accumulate_usage(response_cost)
+        master_state.accumulate_usage(response_cost)
+    except Exception as e:
+        print(f"❌ Error accumulating usage: {e}")
 
 async def on_transcript_event(event, master_state):
     """ Track the transcript of the conversation. """
     event_type = event["type"]
-    if event_type == 'response.audio_transcript.done':
+    if event_type == 'response.output_audio_transcript.done':
         await master_state.add_to_transcript("AI", event['transcript'])
 
     elif event_type == 'conversation.item.input_audio_transcription.completed':
@@ -266,7 +284,7 @@ async def on_assistant_audio(event, master_state):
     # stream to speaker and track the active item id for cancellations
     if "item_id" not in event:
         return
-    if event["type"] == "response.audio.delta":
+    if event["type"] == "response.output_audio.delta":
         if "streaming_audio_item_ids" not in master_state.remote_assistant_state:
             master_state.remote_assistant_state["streaming_audio_item_ids"] = []
         if event["item_id"] not in master_state.remote_assistant_state["streaming_audio_item_ids"]:
@@ -304,12 +322,12 @@ async def on_function_call_arguments_done(event, master_state):
         await send_function_call_result(f"Error: {str(e)}", call_id)
 
 assistant_event_handlers = {
-    "response.audio.delta": on_assistant_audio,
-    "response.audio.done": on_assistant_audio,
+    "response.output_audio.delta": on_assistant_audio,
+    "response.output_audio.done": on_assistant_audio,
     "error": on_assistant_error,
     "response.done": on_assistant_response_done,
     "conversation.item.input_audio_transcription.completed": on_transcript_event,
-    "response.audio_transcript.done": on_transcript_event,
+    "response.output_audio_transcript.done": on_transcript_event,
     "response.function_call_arguments.done": on_function_call_arguments_done,
 }
 
@@ -320,3 +338,5 @@ async def on_assistant_input_event(event_raw, master_state):
 
     if etype in assistant_event_handlers:
         await assistant_event_handlers[etype](event, master_state)
+    elif "error" in event_raw or "invalid" in event_raw:
+        print(f"❌ Invalid event: {event_raw}")
