@@ -769,8 +769,8 @@ else:  # Configuration stage
         
         auto_summarize = st.number_input(
             "Auto Summarize Every N Messages",
-            min_value=1, max_value=100,
-            value=st.session_state.config_manager.get_config('AUTO_SUMMARIZE_EVERY_N_MESSAGES') or 20,
+            min_value=10, max_value=2000,
+            value=st.session_state.config_manager.get_config('AUTO_SUMMARIZE_EVERY_N_MESSAGES') or 2000,
             help="All chats are summarized when finished, or when they continue for up to this many messages.",
             key="auto_summarize",
             on_change=lambda: lock_section() if not st.session_state.section_locked else None
