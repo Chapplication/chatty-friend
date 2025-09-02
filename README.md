@@ -1,5 +1,7 @@
 # Chatty Friend 🎙️
 
+[![Click for Youtube Quick Demo Video](https://youtu.be/KJMjCZYRz5s?si=1WS6eXdjLY9bFooA)]
+
 A smart speaker companion for senior citizens, powered by AI and running on Raspberry Pi.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
