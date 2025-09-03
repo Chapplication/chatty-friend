@@ -44,6 +44,7 @@ def connect_to_wifi(ssid, password, no_calls=False):
             time.sleep(5)
 
             for retry in range(5):
+                os.system("espeak -v en-us -a 20 'Attempt "+str(retry+1)+" to connect to WiFi...'"+ssid+"\" with "+str(len(password))+" character password")
                 result = os.system("nmcli d wifi connect \""+ssid+"\" password "+password)
                 if result == 0:
                     break
