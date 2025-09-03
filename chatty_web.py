@@ -18,7 +18,7 @@ from chatty_config import ConfigManager, default_config, CONTACT_TYPE_PRIMARY_SU
 from chatty_secrets import SecretsManager
 from tools.news_service import RSS_NEWS_FEEDS
 import pytz
-from chatty_wifi import IS_PI, IS_MAC, is_online, start_hotspot_mode, connect_to_wifi
+from chatty_wifi import IS_PI, IS_MAC, is_online
 
 # debug
 NO_CALLS = False
