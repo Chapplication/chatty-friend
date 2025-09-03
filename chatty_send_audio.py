@@ -16,6 +16,7 @@ async def stream_to_assistant(manager: AsyncManager):
     should_exit = False
 
     have_not_sent_audio = True
+
     initial_buffers = []
     while not should_exit:
         try:

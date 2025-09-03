@@ -63,11 +63,6 @@ This guide provides detailed instructions for setting up the hardware components
    - Keep away from windows (traffic noise)
    - Test different locations for best results
 
-### Cable Management
-- Use cable ties or clips
-- Keep power and USB cables tidy
-- Leave some slack for adjustments
-- Label cables if multiple devices
 
 ## Troubleshooting Hardware
 

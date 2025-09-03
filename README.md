@@ -106,7 +106,18 @@ Get Chatty Friend running in QA/test mode on mac quickly:
 
 - **Configure additional tools**: Add weather, news, and search API keys
 - **Customize personality**: Set voice, speed, volume, and system prompts (https://cookbook.openai.com/examples/realtime_prompting_guide)
-- **Set up contacts**: Configure primary contacts for summaries and escalations
+     provide a Role & Objective (ex:you are a playful old friend...)
+     provide a personality (ex:Friendly, calm and approachable counselor, older than the user and with more wisdom and patience)
+     provide a tone (ex:Warm, concise, confident)
+     provide a length (ex:one or two sentences per turn)
+     provide a speed (ex:speak slowly and pace yourself)
+     provide an indication of languages supported (ex:the conversation will be in English or Spanish but not other languages.  Even if you think you hear a different language, respond in english or spanish always)
+     ask for variety (ex:vary your responses so you don't sound like a robot!)
+     tell the model how to say unusual words (ex:say Toledo in Spanish like toh-leh-do)
+     clarify what to do when audio quality is poor (ex:if there is too much background noise and the user is not clear, ask for clarification)
+     ask the model to use tools (weather, news, internet search, etc.) freely (ex:When calling a tool, do not ask for any user confirmation. Be proactive)
+
+- **Set up contacts**: Configure primary contacts for summaries and escalation
 
 ### Full Installation (All Features)
 
@@ -498,7 +509,8 @@ This guide covers setting up Chatty Friend as a headless smart speaker on a Rasp
 a. Download and install [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
 b. Insert your SD card into your computer
 c. Open Raspberry Pi Imager and select:
-   - **OS**: Other general purpose OS → Ubuntu → Ubuntu Desktop 23.04 (64-bit)
+   - **Device**: your device type (raspberry pi 4 and 5 tested)
+   - **OS**: Other general purpose OS → Ubuntu → Ubuntu Desktop 25.04 (64-bit)
    - **Storage**: Your SD card
 d. Click "Write" and wait for completion
 
@@ -506,32 +518,28 @@ d. Click "Write" and wait for completion
 
 a. Insert the SD card into your Raspberry Pi and power on
 b. Complete Ubuntu setup with these settings:
-   - **Name**: Chatty Friend
+   - **Wifi**: attach to your wifi
+   - **Name**: chatty
    - **Computer name**: chatty
-   - **Username**: friend
+   - **Username**: chatty
    - **Password**: (your choice)
-   - **Important**: Enable auto Log-in
 
-c. Connect the raspberry pi to your WiFi network
+c. Take the following steps on ubuntu
+   - **Check for Updates**: Run "software updater" and get the latest.  reboot if needed
+   - **Screen Blank**: Disable screen blank in settings->privacy->screen blank delay->Never
+   - **Hot Spotk**: settings->Wifi->hotspot create SSID and Password for your hotspot.  turn it on (snap the QR code now if you want) and back off again.
+   - **Important**: Enable auto Log-in settings->system->users->chatty->unlock->Automatic Login
 
 d. Configure system settings:
-   # update/upgrade your OS
+   # Setting up the environment for chatty: open a Terminal window and enter:
    ```bash
-   # Update system
    sudo apt update && sudo apt upgrade -y
    ```   
-   # Disable screen blanking - in the Pi desktop:
-   #     Settings → Power → Screen Blank → Never
-   
-   # Create WiFi hotspot for later use on the Pi desktop:
-   #    Settings → WiFi → ⋮ → Turn On Wi-Fi Hotspot
-   #    Note the SSID and password, then disable it for now
 
 ### Step 3: Enable SSH Access
 
-On the Raspberry Pi:
+On the Raspberry Pi: from Termina:
 ```bash
-# Install SSH and Git
 sudo apt install -y openssh-server git
 
 # Get your Pi's IP address
@@ -543,19 +551,14 @@ ip a
 
 From your development machine:
 
-# Copy script to Pi (replace XXX with your Pi's IP that was noted earlier)
-scp git_clone_chatty.sh friend@192.168.1.XXX:
+# Sync the git repo for Chatty Friend to your pi
+**run this from terminal on the pi:**
+- git clone https://github.com/Chapplication/chatty-friend.git
+- cd chatt-friend
+- bash install_chatty_friend_prereqs.sh (Provide the password you created earlier (for the user) and Answer 'yes' when prompted repeatedly, will take some time)
+- bin/streamlit run chatty_web.py (wait a few seconds, will bring up the web interface to configure chatty friend)
+- enter "assistant" which is the default password on the browser screen
 
-On the Raspberry Pi:
-```bash
-# Clone and set up Chatty Friend
-bash git_clone_chatty.sh
-
-
-# Install all prerequisites and configure services
-bash install_chatty_friend_prereqs.sh
-# Answer 'yes' when prompted, will take some time
-```
 
 Enable the hotspot and Reboot the Pi.  You can now run it headless.
 

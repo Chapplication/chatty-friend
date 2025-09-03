@@ -98,7 +98,7 @@ def validate_time(self, time_str: str) -> bool:
 
 ### Common Issues
 1. **Tool not being called**
-   - The function name matters a LOT with the preview realtime audio models.  In the example above, you can see where this is set to "joke_writer_tool" as the first parameter to super().__init__("joke_writer_tool",...)
+   - The function name matters a LOT.  In the example above, you can see where this is set to "joke_writer_tool" as the first parameter to super().__init__("joke_writer_tool",...)
    - Verify parameter descriptions are clear.  Are you expecting text or a structure like XML or json?  one value or many?
    - Ensure tool is registered in chatty_tools.py
 

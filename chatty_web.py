@@ -1182,7 +1182,7 @@ else:  # Configuration stage
         st.info("💡 **Instructions:** Update API keys and sensitive configuration. Only the keys are shown for security - values are hidden.")
         
         # Show current secrets (keys only)
-        secrets_manager = st.session_state.config_manager.master_state.secrets_manager if hasattr(st.session_state.config_manager, 'master_state') else None
+        secrets_manager = st.session_state.secrets_manager if hasattr(st.session_state, 'secrets_manager') else None
         
         if secrets_manager:
             st.write("**Current API Keys:**")

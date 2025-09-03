@@ -244,7 +244,7 @@ class ConfigManager:
             if not isinstance(updated_config, dict):
                 return False, "Config must be a JSON object (dictionary)"
             
-            # Merge with existing secrets (update/add new keys, preserve existing ones)
+            # Merge with existing config (update/add new keys, preserve existing ones)
             merged_config = self.config.copy()  # Start with existing config
             merged_config.update(updated_config)    # Add/update with new config
 

@@ -12,6 +12,7 @@ bin/pip install pyaudio
 sudo apt install espeak
 bin/pip install Wikipedia
 bin/pip install openwakeword
+bin/pip install websockets
 
 sudo apt-get install flac
 sudo apt-get install libreta pico-utils
