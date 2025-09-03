@@ -1,4 +1,4 @@
-cd /home/chatty-friend
+cd /home/chatty/chatty-friend
 
 bin/python chatty_friend.py
 exit_code=$?

@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/chatty-friend
+cd /home/chatty/chatty-friend
 
 while true; do
     bin/python run_chatty_web.py
