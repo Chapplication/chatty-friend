@@ -11,7 +11,7 @@ sudo apt install portaudio19-dev
 bin/pip install pyaudio
 sudo apt install espeak
 bin/pip install Wikipedia
-bin/pip install openwakeword
+bin/pip install openwakeword==0.6.0 --force-reinstall --no-deps
 bin/pip install websockets
 
 sudo apt-get install flac

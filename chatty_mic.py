@@ -29,11 +29,11 @@ class WakeWordDetector:
         if OpenWakewordModel and wake_word_model:
             oww = None
             base_assistant_name = master_state.conman.get_config("WAKE_WORD_MODEL").rsplit(".",1)[0]
-            for extension in [".tflite", ".onnx"]:
+            for extension in ["tflite", "onnx"]:
                 try:
-                    wake_word_file = "./"+base_assistant_name + extension
+                    wake_word_file = "./"+base_assistant_name +"."+ extension
                     print("Trying to load OpenWakeWord model: "+wake_word_file)
-                    oww = OpenWakewordModel(wakeword_models=[wake_word_file], vad_threshold=master_state.conman.get_config("VAD_THRESHOLD"))
+                    oww = OpenWakewordModel(wakeword_models=[wake_word_file], vad_threshold=master_state.conman.get_config("VAD_THRESHOLD"),inference_framework=extension)
                     break
                 except Exception as e:
                     print(f"OpenWakeWord exception: {e}")
