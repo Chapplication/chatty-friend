@@ -9,7 +9,11 @@ import time
 
 
 def is_online():
-    return 0==os.system("ping -c 1 8.8.8.8")
+    for _ in range(10):
+        if 0==os.system("ping -c 1 8.8.8.8"):
+            return True
+        time.sleep(.5)
+    return False
 
 def start_hotspot_mode(no_calls=False):
     """Start hotspot mode on Pi"""

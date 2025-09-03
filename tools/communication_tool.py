@@ -8,13 +8,15 @@ class CommunicationTool(LLMTool):
         contact_names = [contact["name"] for contact in contacts]
         if contact_names:
             recipient = LLMToolParameter("recipient", "Contact name from the address book", enum=contact_names, required=True)
+        else:
+            recipient = None
         subject = LLMToolParameter("subject", "Message subject or title")  
         message = LLMToolParameter("message", "Message content to send")
         priority = LLMToolParameter("priority", "Delivery method: 'urgent'=immediate SMS, 'high'=SMS preferred, 'medium'/'low'=email only", enum=["low", "medium", "high", "urgent"])
         
         super().__init__("communication_tool",
                          "Use this tool to send notifications to contacts via email or SMS when directly asked or in response to a need to escalate events communicated by the user.", 
-                         [recipient, subject, message, priority],
+                         [recipient, subject, message, priority] if recipient else [subject, message, priority],
                          master_state)
 
     async def invoke(self, args):
