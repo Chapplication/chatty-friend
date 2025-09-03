@@ -23,6 +23,8 @@ sudo apt-get install libttspico-utils
 sudo apt install mpg123
 
 
+bin/python init_oww_models.py
+
 # Install UFW if not already installed
 sudo apt install -y ufw
 
