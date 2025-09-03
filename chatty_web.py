@@ -202,34 +202,14 @@ if IS_PI and not is_online():
     current_ssid = st.session_state.config_manager.get_config('WIFI_SSID')
     current_password = st.session_state.config_manager.get_config('WIFI_PASSWORD')
     
-    # If we have WiFi credentials, try to connect
-    if current_ssid and current_password and connect_to_wifi(current_ssid, current_password, no_calls=NO_CALLS):
-        time.sleep(10)
-        if is_online():
-            st.success("✅ Connected to WiFi!")
-            # Save to known connections and move to authentication
-            known_connections = st.session_state.config_manager.get_config('WIFI_KNOWN_CONNECTION') or {}
-            known_connections[current_ssid] = current_password
-            st.session_state.config_manager.save_config({'WIFI_KNOWN_CONNECTION': known_connections})
-            st.rerun()
-        start_hotspot_mode(no_calls=NO_CALLS)
-
-    # Periodic "waiting for wifi" announcement
-    if 'last_wifi_announcement' not in st.session_state:
-        st.session_state.last_wifi_announcement = time.time()
-    
-    if time.time() - st.session_state.last_wifi_announcement > 60:  # Every 60 seconds
-        st.session_state.last_wifi_announcement = time.time()
-        start_hotspot_mode(no_calls=NO_CALLS)
-
     # Hotspot mode UI
     st.markdown("<div class='warning-message'>📡 Hotspot Mode Active</div>", unsafe_allow_html=True)
     st.info("⚠️ This Pi requires 2.4GHz WiFi networks")
         
     with st.form("wifi_form"):
         st.subheader("WiFi Configuration")
-        ssid = st.text_input("Network Name (SSID)", value="", key="wifi_ssid")
-        password = st.text_input("Password", type="password", value="", key="wifi_password")
+        ssid = st.text_input("Network Name (SSID)", value=current_ssid or "", key="wifi_ssid")
+        password = st.text_input("Password", type="password", value=current_password or "", key="wifi_password")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -238,12 +218,13 @@ if IS_PI and not is_online():
             cancel = st.form_submit_button("❌ Cancel")
         
         if save_wifi:
-            st.info("🔄 Attempting to connect to WiFi...")
+            st.info("🔄 Rebooting to connect to WiFi...")
             st.session_state.config_manager.save_config({
                 'WIFI_SSID': ssid,
                 'WIFI_PASSWORD': password
             })
-            st.rerun()                
+            import subprocess
+            subprocess.run(['sudo', 'reboot'], check=False)
         
         if cancel:
             st.rerun()

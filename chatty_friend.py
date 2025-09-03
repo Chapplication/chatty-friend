@@ -7,6 +7,7 @@ from chatty_send_audio import stream_to_assistant
 from chatty_speaker import speaker_player
 from chatty_state import ChattyMasterState
 from chatty_realtime_messages import *
+from chatty_wifi import is_online
 
 from chatty_config import USER_SAID_WAKE_WORD, USER_STARTED_SPEAKING, ASSISTANT_STOP_SPEAKING, MASTER_EXIT_EVENT, ASSISTANT_RESUME_AFTER_AUTO_SUMMARY
 from chatty_config import SPEAKER_PLAY_TONE, CHATTY_SONG_STARTUP, CHATTY_SONG_AWAKE
@@ -98,7 +99,11 @@ async def assistant_go_live():
     master_state = ChattyMasterState()
 
     import os
-    os.system("espeak -v en-us -a 20 'Chatty Friend is named " + master_state.conman.get_config("WAKE_WORD_MODEL") + "'")
+    if not is_online():
+        message = "Cannot find Wifi.  please connect to the device hotspot and browse to 10 dot 42 dot 0 dot 1 to configure."
+    else:
+        message = "Chatty Friend is named " + master_state.conman.get_config("WAKE_WORD_MODEL")
+    os.system("espeak -v en-us -a 20 '"+message+"'")
 
     is_automated_restart_after_summary = False
 
