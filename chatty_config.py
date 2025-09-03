@@ -30,7 +30,7 @@ cost_sheet_per_million = {
     }
 }
 
-CHATTY_FRIEND_VERSION_NUMBER = "0.1.3"
+CHATTY_FRIEND_VERSION_NUMBER = "0.1.4"
 
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {

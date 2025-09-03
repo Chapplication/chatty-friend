@@ -13,6 +13,7 @@ sudo apt install espeak
 bin/pip install Wikipedia
 bin/pip install openwakeword==0.6.0 --force-reinstall --no-deps
 bin/pip install websockets
+bin/pip install feedparser
 
 sudo apt-get install flac
 sudo apt-get install libreta pico-utils
