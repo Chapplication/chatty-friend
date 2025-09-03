@@ -43,7 +43,7 @@ default_config = {
     "SPEED" : 60,
     "VOLUME" : 50,
     "AUTO_GO_TO_SLEEP_TIME_SECONDS" : 30*60,
-    "NEWS_PROVIDER" : "BBC",
+    "NEWS_PROVIDER" : "NPR",
     "VOICE_ASSISTANT_SYSTEM_PROMPT" : """
         You are a kind and attentive companion keeping company and enjoying the day with a human friend.
         Keep your responses short but engagiing like a delightful conversationalist, without being too eager to offer help but stepping in with help when asked.
@@ -56,8 +56,7 @@ default_config = {
         The user knows you are an AI, so it would be boring and disruptive to remind them unless they bring it up.  
 
         If you get a short utterance from the user in a language that has not been part of the conversation, ignore it because it is probably a misunderstanding.  Ask for a clarification in the language that the user normally uses if you are not sure.
-        If there is conversation that seems like it might not be directed to you, ignore it and if it continues, be sure to pipe up and remind the user that you're in the conversation and they can ask you to go to sleep if they want privacy.        
-        IMPORTANT:  For you to be kind and attentive, you must note any new facts the user provides in their profile.  If you forget and the user has to tell you more than once, they will think you're rude and impersonal.""",
+        If there is conversation that seems like it might not be directed to you, ignore it and if it continues, be sure to pipe up and remind the user that you're in the conversation and they can ask you to go to sleep if they want privacy.""",
     "WAKE_WORD_MODEL" : "amanda",
     "WAKE_WORD_MODEL_CHOICES" : ["amanda", "oliver"],
     "VAD_THRESHOLD" : 0.3,

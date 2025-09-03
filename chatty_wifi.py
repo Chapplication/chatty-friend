@@ -41,7 +41,7 @@ def connect_to_wifi(ssid, password):
     connection_name = f"conn-{ssid}"
     
     def speak(message):
-        os.system(f'espeak "{message}" 2>/dev/null')
+        os.system(f'espeak -a 50 "{message}" 2>/dev/null')
     
     def get_wifi_interface():
         result = subprocess.run(['nmcli', 'dev', 'status'], 
@@ -68,10 +68,10 @@ def connect_to_wifi(ssid, password):
     
     # Check if already connected
     if is_connected():
-        speak(f"Already connected to {ssid}")
+        speak(f"connected to {ssid}")
         return True
     
-    speak("Starting WiFi setup")
+    speak("WiFi setup")
     
     # Ensure WiFi is on
     os.system("nmcli radio wifi on")
@@ -81,7 +81,7 @@ def connect_to_wifi(ssid, password):
     interface = get_wifi_interface()
     
     # Scan for networks
-    speak("Scanning for networks")
+    speak("Scanning")
     os.system("nmcli device wifi rescan")
     time.sleep(5)
     

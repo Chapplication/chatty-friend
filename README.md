@@ -97,6 +97,9 @@ Get Chatty Friend running in QA/test mode on mac quickly:
    ```
 
 4. **Simulate wake word** - Press `w` to wake up Chatty
+   wake word detection only works in headless mode on raspberry Pi where there is a lot of control over audio and system resources.
+   On Mac, use keboard "push to talk" with the space bar to simulate VAD, and use W key to simulate wake word detection.
+   This also allows for fast interactive prompt development as you don't have to go through the sleep/supervise cycle to iterate.
 
 5. **Talk to Chatty** - Hold `space` and speak (push-to-talk mode)
 
@@ -274,12 +277,12 @@ On Raspberry Pi, sessions automatically timeout after 10 minutes of inactivity, 
 
 ### Cold-start on the Pi:
 - install chatty friend using the Pi image instructions (see deployment instructions below)
-- boot the Pi and attach to the hotspot it provides using the chatty_friend SSID (password 'assistant')
+- boot the Pi and attach an external device (phone/browser) to the hotspot it provides (chatty / assistant)
 - point your browser to 10.42.0.1 and configure:
    - provide a wifi SSID and Wifi Password for it to use insteasd of its hotspot
    - enter the default password chatty friend password 'assistant'
    - configure a new password
-   - condigure a primary email contact and email server credentials
+   - configure a primary email contact and email server credentials
    - configure an OpenAI realtime key under the 'secrets' configuration by pasting json into the window:
    {
      "chat_api_key": "sk-proj-your-openai-api-key-here"
@@ -288,14 +291,12 @@ On Raspberry Pi, sessions automatically timeout after 10 minutes of inactivity, 
 
 ### Wake Word Configuration
 
-The default wake word is "Amanda" but can be customized using [OpenWakeWord](https://github.com/dscripka/openWakeWord). To train a custom wake word:
+The default wake word is "Amanda" but can be changed to "oliver" or customized using [OpenWakeWord](https://github.com/dscripka/openWakeWord). To train a custom wake word:
 
 1. Follow the [OpenWakeWord training guide](https://github.com/dscripka/openWakeWord#training-custom-models)
 2. Generate your custom `.tflite` model
 3. Replace the model file in the project
 4. Update the wake word in configuration
-
-*Note: Future versions will support "Amanda" as the default wake word.*
 
 ### Primary Contact System
 
@@ -536,20 +537,7 @@ d. Configure system settings:
    sudo apt update && sudo apt upgrade -y
    ```   
 
-### Step 3: Enable SSH Access
-
-On the Raspberry Pi: from Termina:
-```bash
-sudo apt install -y openssh-server git
-
-# Get your Pi's IP address
-ip a
-# Note the IP address (e.g., 192.168.1.100)
-```
-
-### Step 4: Install Chatty Friend
-
-From your development machine:
+### Step 3: Install Chatty Friend
 
 # Sync the git repo for Chatty Friend to your pi
 **run this from terminal on the pi:**
@@ -558,7 +546,6 @@ From your development machine:
 - bash install_chatty_friend_prereqs.sh (Provide the password you created earlier (for the user) and Answer 'yes' when prompted repeatedly, will take some time)
 - bin/streamlit run chatty_web.py (wait a few seconds, will bring up the web interface to configure chatty friend)
 - enter "assistant" which is the default password on the browser screen
-
 
 Enable the hotspot and Reboot the Pi.  You can now run it headless.
 
