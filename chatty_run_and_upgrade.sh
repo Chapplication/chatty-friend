@@ -9,8 +9,6 @@ while true; do
         echo "Upgrade and restart."
         git pull
         bin/pip install -r requirements.txt
-        cp run_chatty.sh /etc/profile.d
-        chmod +x /etc/profile.d/run_chatty.sh
     elif [ $exit_code -eq 3 ] || [ $exit_code -eq 0 ]; then
         echo "Exiting without restart (code $exit_code)"
         break
