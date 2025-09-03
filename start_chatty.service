@@ -1,10 +1,18 @@
 [Unit]
+Description=Chatty Service
 After=network.target sound.target
 Requires=sound.target
 
 [Service]
-Type=forking
+Type=simple
+Environment="DISPLAY="
+Environment="SSH_ASKPASS="
+Environment="DEBIAN_FRONTEND=noninteractive"
 ExecStart=/usr/local/bin/start_chatty.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=default.target
