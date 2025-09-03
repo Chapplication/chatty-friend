@@ -30,7 +30,7 @@ cost_sheet_per_million = {
     }
 }
 
-
+CHATTY_FRIEND_VERSION = "0.1.2"
 
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {
@@ -81,7 +81,6 @@ default_config = {
     "WIFI_KNOWN_CONNECTION": {},
     "TIME_ZONE" : None,
     "SUPERVISOR_INSTRUCTIONS" : None,
-    "VERSION" : "0.1.1",
 }
 default_config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in voice_choices else voice_choices[list(voice_choices.keys())[0]]
 default_config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in cost_sheet_per_million else cost_sheet_per_million[list(cost_sheet_per_million.keys())[0]]
@@ -189,18 +188,29 @@ class ConfigManager:
     """
     
     def __init__(self, config_file: str = "chatty_config.json"):
+
         self.config_file = config_file
         self.config = {}
         self.default_config = default_config
 
         if self.load_config():
             missing_keys = [k for k in default_config.keys() if k not in self.config]
+
+            # version is in the config so the website can see it but force sync to the code
+            missing_keys.extend(["CHATTY_FRIEND_VERSION"])
         else:
             self.config = {}
             missing_keys = default_config.keys()
 
         if missing_keys:
             self.save_config({k: default_config[k] for k in missing_keys})
+
+        # force sync up cost and voice choices based on the model selected
+        if self.config["REALTIME_MODEL"] not in voice_choices:
+            self.config["REALTIME_MODEL"] = default_config["REALTIME_MODEL"]
+
+        self.config["VOICE_CHOICES"] = voice_choices[self.config["REALTIME_MODEL"]] if self.config["REALTIME_MODEL"] in voice_choices else voice_choices[list(voice_choices.keys())[0]]
+        self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[self.config["REALTIME_MODEL"]] if self.config["REALTIME_MODEL"] in cost_sheet_per_million else cost_sheet_per_million[list(cost_sheet_per_million.keys())[0]]
         
     def load_config(self) -> bool:
         try:
