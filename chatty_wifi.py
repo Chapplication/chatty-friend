@@ -26,7 +26,8 @@ def start_hotspot_mode(no_calls=False):
             os.system("nmcli radio wifi on")
             os.system("nmcli device wifi rescan")
             os.system(f"nmcli device wifi hotspot")
-    except:
+    except Exception as e:
+        print(f"Error starting hotspot mode: {e}")
         pass
 
 def connect_to_wifi(ssid, password, no_calls=False):
