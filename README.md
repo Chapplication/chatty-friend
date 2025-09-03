@@ -49,7 +49,7 @@ There are a lot of OpenAI realtime projects on github.  Here's what's unique:
 - "Is there any news about the floods" -> checks online RSS feeds for related news
 - "was there a war during Ford's presidency" -> looks at wikipedia entry for US President Ford
 - "What's the new superman movie" -> Google searches (if the key is configured) the name
-- Is it warmer where Noah liveS? -> gets the live weather (if weather key is configured) weather in the current city (learned from conversation and stored in user's profile) as well as from the city where Noah lives (also learned) and compares the two, composing a nice reply.
+- Is it warmer where Noah lives? -> gets the live weather (if weather key is configured) weather in the current city (learned from conversation and stored in user's profile) as well as from the city where Noah lives (also learned) and compares the two, composing a nice reply.
 - "My friend Barbara is from Kentucky" -> remembers Barbara for future conversations, with facts related to her
 - "what day is it" -> its Wendesday, October 5, 2024.  What do you want to do today?!
 - "how much is 128 times 42" -> "Its 5,376!  why do you ask?"
@@ -347,7 +347,7 @@ The architecture evolves through layers of complexity, starting simple and addin
                                                         [websocket]
                                                             │ ▼
      ┌──────┐         ┌─────────────────────┐         ┌─────────────┐         ┌─────────┐
-     │ User │────────▶│   VAD/Wake Word     │────────▶│ Chatty      │────────▶│ Speaker │
+     │ User │────────▶│  VAD/Open Wake Word │────────▶│ Chatty      │────────▶│ Speaker │
      │      │ [voice] │   Detector          │[voice]  │ Friend      │ [audio] │         │
      └──────┘         │                     │         └─────────────┘         └─────────┘
                       │ 🔒 Local Processing │              
@@ -360,14 +360,14 @@ The architecture evolves through layers of complexity, starting simple and addin
 ```
                                                     ☁️ OpenAI Real-time API
                                                         ┌─────────────┐
-                                                        │  GPT-4o     │
-                                                        │ Mini/Audio  │
+                                                        │gpt-realtime │
+                                                        │             │
                                                         └─────────────┘
                                                             ▲ │
                                                         [websocket]
                                                             │ ▼
      ┌──────┐         ┌─────────────────────┐         ┌─────────────┐         ┌─────────┐
-     │ User │────────▶│   VAD/Wake Word     │────────▶│ Chatty      │────────▶│ Speaker │
+     │ User │────────▶│VAD/Open Wake Word   │────────▶│ Chatty      │────────▶│ Speaker │
      │      │ [voice] │   Detector          │[voice]  │ Friend      │ [audio] │         │
      └──────┘         └─────────────────────┘         └─────┬───────┘         └─────────┘
                                                             │
@@ -386,14 +386,14 @@ The architecture evolves through layers of complexity, starting simple and addin
 ```
                                                 ☁️ OpenAI Real-time API
                                                         ┌─────────────┐
-                                                        │  GPT-4o     │
-                                                        │ Mini/Audio  │
+                                                        │gpt-realtime │
+                                                        │             │
                                                         └─────────────┘
                                                             ▲ │
                                                         [websocket]
                                                             │ ▼
      ┌──────┐         ┌─────────────────────┐         ┌─────────────┐         ┌─────────┐
-     │ User │────────▶│   VAD/Wake Word     │────────▶│ Chatty      │────────▶│ Speaker │
+     │ User │────────▶│ VAD/Open Wake Word  │────────▶│ Chatty      │────────▶│ Speaker │
      │      │ [voice] │   Detector          │[voice]  │ Friend      │ [audio] │         │
      └──────┘         └─────────────────────┘         └─────┬───────┘         └─────────┘
                                 ▲                           │                       
@@ -410,7 +410,7 @@ The architecture evolves through layers of complexity, starting simple and addin
                                 ▼
                       ┌─────────────────────┐              ☁️ OpenAI Reasoning
                       │    Supervisor       │                  ┌─────────────┐
-                      │                     │─────────────────▶│   GPT-4o    │
+                      │                     │─────────────────▶│   GPT       │
                       │ 🧠 Monitors         │  [analysis]      │ Reasoning   │
                       │ 📧 Summarizes       │◀─────────────────│   Model     │
                       │ 🚨 Escalates        │  [insights]      └─────────────┘
@@ -433,7 +433,7 @@ The architecture evolves through layers of complexity, starting simple and addin
      │                 │                    │                 │
      └─────────┬───────┘                    └─────────┬───────┘
                │                                      │
-               │ [reads/writes]              [reads/writes] │
+         [reads/writes]                        [reads/writes]
                │                                      │
                └──────────────┬───────────────────────┘
                               │
