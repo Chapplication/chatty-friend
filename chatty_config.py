@@ -30,7 +30,7 @@ cost_sheet_per_million = {
     }
 }
 
-CHATTY_FRIEND_VERSION = "0.1.2"
+CHATTY_FRIEND_VERSION_NUMBER = "0.1.2"
 
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {
@@ -84,6 +84,8 @@ default_config = {
 }
 default_config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in voice_choices else voice_choices[list(voice_choices.keys())[0]]
 default_config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in cost_sheet_per_million else cost_sheet_per_million[list(cost_sheet_per_million.keys())[0]]
+default_config["CHATTY_FRIEND_VERSION"] = CHATTY_FRIEND_VERSION_NUMBER
+
 
 CONTACT_TYPE_PRIMARY_SUPERVISOR = "primary"
 CONTACT_TYPE_OTHER = "other"
