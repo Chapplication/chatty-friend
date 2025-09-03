@@ -53,7 +53,7 @@ There are a lot of OpenAI realtime projects on github.  Here's what's unique:
 - "My friend Barbara is from Kentucky" -> remembers Barbara for future conversations, with facts related to her
 - "what day is it" -> its Wendesday, October 5, 2024.  What do you want to do today?!
 - "how much is 128 times 42" -> "Its 5,376!  why do you ask?"
-- "get the latest upgrade" -> pulls latest repository from chatty-friend
+- "get the latest upgrade" -> pulls latest repository from chatty-friend (running in headless mode on the Pi)
 
 Coming soon: Learn more at [chattyfriend.com](https://chattyfriend.com)
 

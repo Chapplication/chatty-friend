@@ -3,7 +3,7 @@ import socket
 
 class SystemInfoTool(LLMTool):
     def __init__(self, master_state):
-        super().__init__("version_and_ip_address", "Use this tool when the user asks for version information or IP configuration", [], master_state)
+        super().__init__("version_and_ip_address", "Use this tool when the user asks for version information, wifi SSID or IP address.", [], master_state)
         
     def what_is_my_ip(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -20,4 +20,4 @@ class SystemInfoTool(LLMTool):
         return IP
 
     async def invoke(self, args):
-        return f"Chatty Friend Configuration is accessible by pointing a browser at IP address is {self.what_is_my_ip()}.  The current version of Chatty Friend is  {self.master_state.conman.get_config('VERSION')}"
+        return f"Chatty Friend Configuration is accessible by pointing a browser at IP address is {self.what_is_my_ip()}.  The current version of Chatty Friend is {self.master_state.conman.get_config('CHATTY_FRIEND_VERSION')} and the wake word model is {self.master_state.conman.get_config('WAKE_WORD_MODEL')}.  Chatty Friend is attached to Wifi network {self.master_state.conman.get_config('WIFI_SSID')}"
