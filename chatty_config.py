@@ -32,6 +32,16 @@ cost_sheet_per_million = {
 
 CHATTY_FRIEND_VERSION_NUMBER = "0.1.4"
 
+
+profile_suggestions = """
+Where does the user live?
+What is their preferred gender?
+what is their preferred language?
+who are important relatives?
+any pets?
+important information about the user's living situation, mood, etc.
+"""
+
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {
     "REALTIME_MODEL" : "gpt-realtime",
@@ -64,10 +74,8 @@ default_config = {
     "SECONDS_TO_WAIT_FOR_MORE_VOICE" : 1.0,
     "CONFIG_PASSWORD" : "assistant",
     "CONFIG_PASSWORD_HINT": "assistant",
-    "USER_PROFILE" : [],
+    "USER_PROFILE" : [profile_suggestions],
     "PRIOR_PRE_ESCALATION_NOTES" : [],
-    "TIME_ZONE" : None,
-    "LAST_CONFIG_EDIT_TIME": 0,
     "RESUME_CONTEXT" : None,
     "RESUME_CONTEXT_SAVE_TIME" : None,
     "CONTACTS":[], 
@@ -197,9 +205,10 @@ class ConfigManager:
         if self.load_config():
             missing_keys = [k for k in default_config.keys() if k not in self.config]
 
-            # version is in the config so the website can see it but force sync to the code
+            # version is in the config so the website can see it but force sync to the code here
             missing_keys.extend(["CHATTY_FRIEND_VERSION"])
         else:
+            # blank config... load it all
             self.config = {}
             missing_keys = default_config.keys()
 

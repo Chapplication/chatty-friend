@@ -1,15 +1,11 @@
 # chatty_web.py
 # Finley 2025
 
-# web interface for chatty config
+# web interface for chatty friend config
 
 import streamlit as st
-import json
-import os
-import platform
 import time
 import subprocess
-import threading
 import re
 import random
 import asyncio
@@ -18,46 +14,40 @@ from chatty_config import ConfigManager, default_config, CONTACT_TYPE_PRIMARY_SU
 from chatty_secrets import SecretsManager
 from tools.news_service import RSS_NEWS_FEEDS
 import pytz
+import subprocess
+
 from chatty_wifi import IS_PI, IS_MAC, is_online
 
-# debug
-NO_CALLS = False
-#IS_PI = True
+# DO NOT COMMIT THIS True!!!
+TESTING_PI_UI_MOCK_SYSTEM_CALLS = True
+if TESTING_PI_UI_MOCK_SYSTEM_CALLS:
+    IS_PI = True
+    IS_MAC = False
 
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-
-if 'last_activity' not in st.session_state:
-    st.session_state.last_activity = time.time()
-
+# first time session state setup
 if 'config_manager' not in st.session_state:
     st.session_state.config_manager = ConfigManager()
 
 if 'secrets_manager' not in st.session_state:
     st.session_state.secrets_manager = SecretsManager()
 
-def update_activity():
-    """Update last activity timestamp"""
-    st.session_state.last_activity = time.time()
+if 'authentication_time' not in st.session_state:
+    st.session_state.authentication_time = None
 
-def check_session_timeout():
-    """Check if session has timed out (10 minutes of inactivity)"""
-    if IS_PI and st.session_state.authenticated:
-        if time.time() - st.session_state.last_activity > 600:  # 10 minutes
-            st.session_state.authenticated = False
-            st.warning("Session timed out due to inactivity. Returning to connectivity mode.")
-            st.rerun()
+# timeout the login if no activity for 10 minutes on PI
+if IS_PI and st.session_state.authentication_time:
+    if time.time() - st.session_state.authentication_time > 600:  # 10 minutes
+        st.session_state.authentication_time = None
+    else:
+        st.session_state.authentication_time = time.time()
 
 def speak_text(text):
     """Use espeak to speak text on Pi"""
-    if IS_PI and not NO_CALLS:
+    if IS_PI and not TESTING_PI_UI_MOCK_SYSTEM_CALLS:
         try:
             subprocess.run(['espeak', text], check=False)
         except:
             pass
-
-
-
 
 def validate_email(email):
     """Validate email format"""
@@ -122,11 +112,223 @@ Chatty Friend System"""
     except Exception as e:
         return False, f"Failed to send email: {str(e)}"
 
-# Auto-timeout check
-check_session_timeout()
+def render_improved_list_editor(
+    section_key: str,
+    config_key: str,
+    title: str,
+    instructions: str,
+    item_label: str = "Entry",
+    allow_reorder: bool = True
+):
+    """
+    Renders an improved list editor with better UX
+    """
+    
+    # Initialize session state keys
+    edit_key = f"{section_key}_edit_mode"
+    temp_key = f"{section_key}_temp_data"
+    original_key = f"{section_key}_original"
+    new_item_key = f"{section_key}_new_item"
+    
+    # Initialize edit mode
+    if edit_key not in st.session_state:
+        st.session_state[edit_key] = False
+    
+    # Load data on first run or when not editing
+    if temp_key not in st.session_state or not st.session_state[edit_key]:
+        current_data = st.session_state.config_manager.get_config(config_key) or []
+        st.session_state[temp_key] = current_data.copy()
+        st.session_state[original_key] = current_data.copy()
+    
+    # Display mode toggle
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.subheader(title)
+    with col2:
+        if st.session_state[edit_key]:
+            if st.button("👁️ View Mode", key=f"{section_key}_view_mode"):
+                st.session_state[edit_key] = False
+                # Clear the new item field when switching to view mode
+                if new_item_key in st.session_state:
+                    del st.session_state[new_item_key]
+                st.rerun()
+        else:
+            if st.button("✏️ Edit Mode", key=f"{section_key}_edit_mode_btn"):
+                st.session_state[edit_key] = True
+                st.rerun()
+    
+    st.info(instructions)
+    
+    # Get current list
+    items = st.session_state[temp_key]
+    
+    if st.session_state[edit_key]:
+        # EDIT MODE
+        st.markdown("### 📝 Edit Mode")
+        
+        # Add new item at top
+        with st.container():
+            new_item = st.text_area(
+                f"Add New {item_label}",
+                key=new_item_key,
+                height=100,
+                placeholder=f"Type your new {item_label.lower()} here..."
+            )
+            
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                if st.button("➕ Add", key=f"{section_key}_add", type="primary"):
+                    if new_item.strip():
+                        st.session_state[temp_key].insert(0, new_item.strip())
+                        # Instead of modifying the widget's session state, delete it
+                        # This will cause it to be recreated fresh on the next run
+                        del st.session_state[new_item_key]
+                        st.success(f"Added new {item_label.lower()}!")
+                        st.rerun()
+        
+        st.divider()
+        
+        # Edit existing items
+        for i, item in enumerate(items):
+            with st.container():
+                col1, col2 = st.columns([4, 1])
+                
+                with col1:
+                    # Use text_area with unique key but no on_change
+                    items[i] = st.text_area(
+                        f"{item_label} {i+1}",
+                        value=item,
+                        key=f"{section_key}_item_{i}",
+                        height=100
+                    )
+                
+                with col2:
+                    # Action buttons in a vertical layout
+                    if st.button("🗑️", key=f"{section_key}_delete_{i}", help=f"Delete {item_label.lower()}"):
+                        st.session_state[temp_key].pop(i)
+                        st.rerun()
+                    
+                    if allow_reorder:
+                        if i > 0 and st.button("⬆️", key=f"{section_key}_up_{i}", help="Move up"):
+                            items[i], items[i-1] = items[i-1], items[i]
+                            st.rerun()
+                        
+                        if i < len(items)-1 and st.button("⬇️", key=f"{section_key}_down_{i}", help="Move down"):
+                            items[i], items[i+1] = items[i+1], items[i]
+                            st.rerun()
+        
+        # Save/Cancel buttons
+        st.divider()
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("💾 Save Changes", key=f"{section_key}_save", type="primary"):
+                # Save to config
+                success, message = st.session_state.config_manager.save_config({
+                    config_key: st.session_state[temp_key]
+                })
+                if success:
+                    st.session_state[edit_key] = False
+                    st.session_state[original_key] = st.session_state[temp_key].copy()
+                    # Clear the new item field
+                    if new_item_key in st.session_state:
+                        del st.session_state[new_item_key]
+                    st.success("✅ Changes saved!")
+                    st.rerun()
+                else:
+                    st.error(f"❌ Error: {message}")
+        
+        with col2:
+            if st.button("❌ Cancel", key=f"{section_key}_cancel"):
+                # Restore original
+                st.session_state[temp_key] = st.session_state[original_key].copy()
+                st.session_state[edit_key] = False
+                # Clear the new item field
+                if new_item_key in st.session_state:
+                    del st.session_state[new_item_key]
+                st.warning("Changes discarded")
+                st.rerun()
+        
+        with col3:
+            if st.button("🗑️ Clear All", key=f"{section_key}_clear"):
+                if st.checkbox("Confirm clear all", key=f"{section_key}_confirm_clear"):
+                    st.session_state[temp_key] = []
+                    st.rerun()
+    
+    else:
+        # VIEW MODE
+        if not items:
+            st.info(f"No {item_label.lower()}s added yet. Click 'Edit Mode' to add some!")
+        else:
+            for i, item in enumerate(items):
+                with st.container():
+                    st.markdown(f"**{item_label} {i+1}:**")
+                    st.markdown(item)
+                    if i < len(items) - 1:
+                        st.divider()
 
-# Update activity on any interaction
-update_activity()
+# Unified Section Manager
+class SectionManager:
+    """Manages consistent save/lock behavior across all sections"""
+    
+    def __init__(self, section_id: str, auto_lock: bool = True):
+        self.section_id = section_id
+        self.auto_lock = auto_lock
+        self.changes_key = f"{section_id}_has_changes"
+        self.original_values_key = f"{section_id}_original_values"
+        
+    def track_field(self, field_name: str, current_value, widget_key: str = None):
+        """Track a field for changes"""
+        if self.original_values_key not in st.session_state:
+            st.session_state[self.original_values_key] = {}
+        
+        # Store original value if not already stored
+        if field_name not in st.session_state[self.original_values_key]:
+            st.session_state[self.original_values_key][field_name] = current_value
+        
+        # Check if value has changed
+        original = st.session_state[self.original_values_key][field_name]
+        
+        # Get the current widget value if widget_key provided
+        if widget_key and widget_key in st.session_state:
+            current_value = st.session_state[widget_key]
+        
+        has_changed = original != current_value
+        
+        # Update changes flag
+        if self.changes_key not in st.session_state:
+            st.session_state[self.changes_key] = False
+        
+        if has_changed and not st.session_state[self.changes_key]:
+            st.session_state[self.changes_key] = True
+            if self.auto_lock and not st.session_state.section_locked:
+                lock_section()
+                st.rerun()
+        
+        return has_changed
+    
+    def render_save_status(self):
+        """Show consistent save status across all sections"""
+        if st.session_state.get(self.changes_key, False):
+            st.info("📝 You have unsaved changes")
+        
+        if st.session_state.section_locked:
+            st.warning("🔒 Section is locked - use Save/Cancel buttons in sidebar")
+    
+    def reset(self):
+        """Reset tracking for this section"""
+        if self.original_values_key in st.session_state:
+            del st.session_state[self.original_values_key]
+        if self.changes_key in st.session_state:
+            del st.session_state[self.changes_key]
+
+# Sections that should save immediately
+INSTANT_SAVE_SECTIONS = {'password', 'wifi', 'reset'}  
+FORM_SECTIONS = {'ai', 'personality', 'content', 'voice_tech', 'secrets'}  
+# Sections with change tracking
+TRACKED_SECTIONS = {'basic', 'user_profile', 'notes', 'contacts', 'supervisor'}  
+
+
 
 # Main app structure
 st.set_page_config(
@@ -195,103 +397,102 @@ st.markdown("""
 platform_text = "🖥️ Mac" if IS_MAC else "🥧 Raspberry Pi"
 st.sidebar.text(f"Platform: {platform_text}")
 
-# Stage routing
-if IS_PI and not is_online():
-    st.markdown("<h1 class='main-header'>🌐 WiFi Connectivity</h1>", unsafe_allow_html=True)
-    
-    current_ssid = st.session_state.config_manager.get_config('WIFI_SSID')
-    current_password = st.session_state.config_manager.get_config('WIFI_PASSWORD')
-    
-    # Hotspot mode UI
-    st.markdown("<div class='warning-message'>📡 Hotspot Mode Active</div>", unsafe_allow_html=True)
-    st.info("⚠️ This Pi requires 2.4GHz WiFi networks")
-        
-    with st.form("wifi_form"):
-        st.subheader("WiFi Configuration")
-        ssid = st.text_input("Network Name (SSID)", value=current_ssid or "", key="wifi_ssid")
-        password = st.text_input("Password", type="password", value=current_password or "", key="wifi_password")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            save_wifi = st.form_submit_button("💾 Save WiFi", type="primary")
-        with col2:
-            cancel = st.form_submit_button("❌ Cancel")
-        
-        if save_wifi:
-            st.info("🔄 Rebooting to connect to WiFi...")
-            st.session_state.config_manager.save_config({
-                'WIFI_SSID': ssid,
-                'WIFI_PASSWORD': password
-            })
-            import subprocess
-            subprocess.run(['sudo', 'reboot'], check=False)
-        
-        if cancel:
-            st.rerun()
-    
+# Pi trying to get on a network - get SSID and PW
+if IS_PI and not st.session_state.authentication_time:
+    if not is_online():
 
-elif not st.session_state.authenticated and IS_PI:
-    st.markdown("<h1 class='main-header'>🔐 Authentication</h1>", unsafe_allow_html=True)
-    
-    password_hint = st.session_state.config_manager.get_config('CONFIG_PASSWORD_HINT') or "No hint available"
-    
-    st.info(f"💡 Hint: {password_hint}")
-    
-    with st.form("auth_form"):
-        entered_password = st.text_input("Password", type="password", key="auth_password")
-        login_button = st.form_submit_button("🔓 Login", type="primary")
+        st.markdown("<h1 class='main-header'>🌐 WiFi Connectivity</h1>", unsafe_allow_html=True)
         
-        if login_button:
-            stored_password = st.session_state.config_manager.get_config('CONFIG_PASSWORD') or "assistant"
-            if entered_password == stored_password:
-                st.session_state.authenticated = True
-                st.session_state.last_activity = time.time()
-                st.session_state.config_manager.save_config({'LAST_CONFIG_EDIT_TIME': time.time()})
-                st.success("✅ Authentication successful!")
-                st.rerun()
-            else:
-                st.error("❌ Invalid password")
-    
-    # Check conditions for lost password button
-    primary_contacts = st.session_state.config_manager.get_contact_by_type(CONTACT_TYPE_PRIMARY_SUPERVISOR)
-    has_primary_contact = primary_contacts and len(primary_contacts) > 0 and primary_contacts[0].get('email')
-    has_email_config = st.session_state.secrets_manager.has_email_configured()
-    
-    if has_primary_contact and has_email_config:
-        st.divider()
-        st.write("**Lost Password?**")
+        current_ssid = st.session_state.config_manager.get_config('WIFI_SSID')
+        current_password = st.session_state.config_manager.get_config('WIFI_PASSWORD')
         
-        if st.button("📧 Reset Password", key="lost_password_button"):
-            # Generate random 6-digit password
-            new_password = f"{random.randint(0, 999999):06d}"
+        # Hotspot mode UI
+        st.markdown("<div class='warning-message'>📡 Hotspot Mode Active</div>", unsafe_allow_html=True)
+        st.info("⚠️ This Pi requires 2.4GHz WiFi networks")
             
-            try:
-                # Send email asynchronously
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                email_success, email_message = loop.run_until_complete(
-                    send_lost_password_email(st.session_state.config_manager, 
-                                            st.session_state.secrets_manager, 
-                                            new_password)
-                )
-                loop.close()
-                
-                if email_success:
-                    # Save new password
-                    st.session_state.config_manager.save_config({
-                        'CONFIG_PASSWORD': new_password,
-                        'LAST_CONFIG_EDIT_TIME': time.time()
-                    })
-                    
-                    st.success(f"✅ Password reset successful!")
-                    st.info("Please check your email for the new password.")
-                else:
-                    st.error(f"❌ Failed to send reset email: {email_message}")
-                    
-            except Exception as e:
-                st.error(f"❌ Failed to reset password: {str(e)}")
+        with st.form("wifi_form"):
+            st.subheader("WiFi Configuration")
+            ssid = st.text_input("Network Name (SSID)", value=current_ssid or "", key="wifi_ssid")
+            password = st.text_input("Password", type="password", value=current_password or "", key="wifi_password")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                save_wifi = st.form_submit_button("💾 Save WiFi and Reboot", type="primary")
+            with col2:
+                cancel = st.form_submit_button("❌ Cancel")
+            
+            if save_wifi:
+                st.info("Device will reboot now. Please wait 2-3 minutes and refresh this page.")
+                st.session_state.config_manager.save_config({
+                    'WIFI_SSID': ssid,
+                    'WIFI_PASSWORD': password
+                })
 
-else:  # Configuration stage
+                # reboot the Pi - startup will attach to wifi before this page runs again
+                if not TESTING_PI_UI_MOCK_SYSTEM_CALLS:
+                    subprocess.run(['sudo', 'reboot'], check=False)
+
+    # we're online, require recent authentication
+    elif not st.session_state.authentication_time:
+        st.markdown("<h1 class='main-header'>🔐 Authentication</h1>", unsafe_allow_html=True)
+        
+        password_hint = st.session_state.config_manager.get_config('CONFIG_PASSWORD_HINT') or "No hint available"
+        
+        st.info(f"💡 Hint: {password_hint}")
+        
+        with st.form("auth_form"):
+            entered_password = st.text_input("Password", type="password", key="auth_password")
+            login_button = st.form_submit_button("🔓 Login", type="primary")
+            
+            if login_button:
+                stored_password = st.session_state.config_manager.get_config('CONFIG_PASSWORD')
+                if entered_password == stored_password:
+                    st.session_state.authentication_time = time.time()
+                    st.success("✅ Authentication successful!")
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid password")
+    
+        # Check conditions for lost password button
+        primary_contacts = st.session_state.config_manager.get_contact_by_type(CONTACT_TYPE_PRIMARY_SUPERVISOR)
+        has_primary_contact = primary_contacts and len(primary_contacts) > 0 and primary_contacts[0].get('email')
+        has_email_config = st.session_state.secrets_manager.has_email_configured()
+        
+        if has_primary_contact and has_email_config:
+            st.divider()
+            st.write("**Lost Password?**")
+            
+            if st.button("📧 Reset Password", key="lost_password_button"):
+                # Generate random 6-digit password
+                new_password = f"{random.randint(0, 999999):06d}"
+                
+                try:
+                    # Send email asynchronously
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    email_success, email_message = loop.run_until_complete(
+                        send_lost_password_email(st.session_state.config_manager, 
+                                                st.session_state.secrets_manager, 
+                                                new_password)
+                    )
+                    loop.close()
+                    
+                    if email_success:
+                        # Save new password
+                        st.session_state.config_manager.save_config({
+                            'CONFIG_PASSWORD': new_password
+                        })
+                        
+                        check_email = primary_contacts[0].get('email')[0:2]+"*****"+primary_contacts[0].get('email')[-2:]
+                        st.success(f"✅ Password reset successful!")
+                        st.info("Please check your email ["+check_email+"] for the new password.")
+                    else:
+                        st.error(f"❌ Failed to send reset email: {email_message}")
+                        
+                except Exception as e:
+                    st.error(f"❌ Failed to reset password: {str(e)}")
+
+else:  # we have wifi and authentication!
     st.markdown("<h1 class='main-header'>⚙️ Chatty Friend Configuration</h1>", unsafe_allow_html=True)
     st.session_state.last_activity = time.time()
         
@@ -299,7 +500,7 @@ else:  # Configuration stage
     sections = [
         {'id': 'basic', 'name': '👤 Basic Settings', 'desc': 'Name, timezone, voice settings'},
         {'id': 'user_profile', 'name': '📝 What Chatty Knows About You', 'desc': 'Biographical information and facts that Chatty should know'},
-        {'id': 'notes', 'name': '📋 Supervisory Notes', 'desc': 'These are observations made by the suppervisor AI that reviews interactions with Chatty.'},
+        {'id': 'notes', 'name': '📋 Pre-Escalation Notes', 'desc': 'You can enter notes here, or review observations made by the suppervisor AI.'},
         {'id': 'contacts', 'name': '👥 Contacts that Chatty can Reach', 'desc': 'Manage contacts such as primary providers, casual users, etc.'},
         {'id': 'password', 'name': '🔑 Password', 'desc': 'Change password'},
         {'id': 'supervisor', 'name': '👥 Supervisor Setup', 'desc': 'Instructions for the conversation supervisor'},
@@ -334,19 +535,19 @@ else:  # Configuration stage
         """Save the current section's data"""
         section_id = st.session_state.current_section
         try:
-            config_updates = {'LAST_CONFIG_EDIT_TIME': time.time()}
+            config_updates = {}
             
             if section_id == 'basic':
                 config_updates.update({
                     'USER_NAME': st.session_state.get('user_name', 'User'),
                     'TIME_ZONE': st.session_state.get('time_zone', '') or None,
-                    'WAKE_WORD_MODEL': st.session_state.get('profile_wake_word', 'amanda'),
-                    'SPEED': st.session_state.get('profile_speed', 60),
-                    'VOLUME': st.session_state.get('profile_volume', 50),
-                    'MAX_PROFILE_ENTRIES': st.session_state.get('max_profile_entries', 100),
-                    'SECONDS_TO_WAIT_FOR_MORE_VOICE': st.session_state.get('seconds_to_wait', 1.0),
-                    'ASSISTANT_EAGERNESS_TO_REPLY': st.session_state.get('eagerness', 50),
-                    'AUTO_GO_TO_SLEEP_TIME_SECONDS': st.session_state.get('sleep_time', 1800)
+                    'WAKE_WORD_MODEL': st.session_state.get('profile_wake_word', st.session_state.config_manager.default_config['WAKE_WORD_MODEL']),
+                    'SPEED': st.session_state.get('profile_speed', st.session_state.config_manager.default_config['SPEED']),
+                    'VOLUME': st.session_state.get('profile_volume', st.session_state.config_manager.default_config['VOLUME']),
+                    'MAX_PROFILE_ENTRIES': st.session_state.get('max_profile_entries', st.session_state.config_manager.default_config['MAX_PROFILE_ENTRIES']),
+                    'SECONDS_TO_WAIT_FOR_MORE_VOICE': st.session_state.get('seconds_to_wait', st.session_state.config_manager.default_config['SECONDS_TO_WAIT_FOR_MORE_VOICE']),
+                    'ASSISTANT_EAGERNESS_TO_REPLY': st.session_state.get('eagerness', st.session_state.config_manager.default_config['ASSISTANT_EAGERNESS_TO_REPLY']),
+                    'AUTO_GO_TO_SLEEP_TIME_SECONDS': st.session_state.get('sleep_time', st.session_state.config_manager.default_config['AUTO_GO_TO_SLEEP_TIME_SECONDS'])
                 })
             elif section_id == 'user_profile':
                 config_updates.update({
@@ -362,16 +563,17 @@ else:  # Configuration stage
                 })
             elif section_id == 'supervisor':
                 config_updates.update({
-                    'AUTO_SUMMARIZE_EVERY_N_MESSAGES': st.session_state.get('auto_summarize', 20),
+                    'AUTO_SUMMARIZE_EVERY_N_MESSAGES': st.session_state.get('auto_summarize', st.session_state.config_manager.default_config['AUTO_SUMMARIZE_EVERY_N_MESSAGES']),
                     'SUPERVISOR_INSTRUCTIONS': st.session_state.get('supervisor_instructions', '')
                 })
             elif section_id == 'password':
                 new_password = st.session_state.get('new_password', '')
                 confirm_password = st.session_state.get('confirm_password', '')
                 if new_password and new_password == confirm_password:
+                    alt_hint = new_password[0]+"...."+new_password[-1]
                     config_updates.update({
                         'CONFIG_PASSWORD': new_password,
-                        'CONFIG_PASSWORD_HINT': st.session_state.get('password_hint', '')
+                        'CONFIG_PASSWORD_HINT': st.session_state.get('password_hint', alt_hint)
                     })
                 else:
                     return False, "Passwords do not match or are empty"
@@ -473,7 +675,7 @@ else:  # Configuration stage
                         'content': ['news_provider'],
                         'voice_tech': ['vad_threshold', 'wake_word_threshold', 'voice_wait_time'],
                         'secrets': ['secrets_json'],
-                        'reset': ['confirm_reset']
+                        'reset': []
                     }
                     
                     keys_to_clear = section_keys.get(old_section, [])
@@ -491,7 +693,7 @@ else:  # Configuration stage
                 st.caption(section['desc'])
         
         # Save/Cancel buttons (only show if section is locked)
-        if st.session_state.section_locked:
+        if st.session_state.section_locked and st.session_state.current_section in TRACKED_SECTIONS:
             st.divider()
             st.write("**Actions:**")
             
@@ -524,7 +726,7 @@ else:  # Configuration stage
                     'content': ['news_provider'],
                     'voice_tech': ['vad_threshold', 'wake_word_threshold', 'voice_wait_time'],
                     'secrets': ['secrets_json'],
-                    'reset': ['confirm_reset']
+                    'reset': []
                 }
                 
                 # Clear keys for current section
@@ -560,7 +762,7 @@ else:  # Configuration stage
         section_titles = {
             'basic': '👤 Basic Profile',
             'user_profile': '📝 What Chatty Knows About You', 
-            'notes': '📋 Supervisory Notes',
+            'notes': '📋 Pre-Escalation Notes',
             'contacts': '👥 Contacts that Chatty can Reach',
             'password': '🔑 Change Password',
             'supervisor': '👥 Supervisor Setup',
@@ -684,62 +886,16 @@ else:  # Configuration stage
         
         st.markdown("</div>", unsafe_allow_html=True)
     
-    elif current_section == 'user_profile':  # User Profile Section
+    elif current_section == 'user_profile':
         st.markdown("<div class='config-section'>", unsafe_allow_html=True)
-        st.subheader("📝 User Profile Details")
         
-        # Instructions
-        st.info("💡 **Instructions:** Tell Chatty about the user in short paragraphs or sentences. click **ADD ENTRY** after you type each one. Be sure to click **SAVE PROFILE** when done to save your changes!")
-        
-        # Initialize user profile in session state if not exists
-        if 'modal_user_profile' not in st.session_state:
-            st.session_state.modal_user_profile = st.session_state.config_manager.get_config('USER_PROFILE') or []
-        
-        if 'original_user_profile' not in st.session_state:
-            st.session_state.original_user_profile = st.session_state.modal_user_profile.copy()
-        
-        user_profile = st.session_state.modal_user_profile
-        
-        # Check for changes and lock section
-        if user_profile != st.session_state.original_user_profile and not st.session_state.section_locked:
-            lock_section()
-            st.rerun()
-        
-        # Display existing profile entries
-        for i, entry in enumerate(user_profile):
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                updated_entry = st.text_area(f"Profile Entry {i+1}", value=entry, key=f"profile_entry_{i}")
-                if updated_entry != entry:
-                    st.session_state.modal_user_profile[i] = updated_entry
-            with col2:
-                st.write("")  # Spacing
-                st.write("")  # More spacing
-                if st.button("🗑️", key=f"delete_profile_{i}", help="Delete this entry"):
-                    st.session_state.modal_user_profile.pop(i)
-                    st.rerun()
-        
-        # Add new entry
-        new_entry = st.text_area("Add New Profile Entry", key="new_profile_entry")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("➕ Add Entry", key="add_profile_entry"):
-                if new_entry.strip():
-                    st.session_state.modal_user_profile.append(new_entry.strip())
-                    st.success("Entry added!")
-                    st.rerun()
-        
-        with col2:
-            if st.button("🗑️ Delete All", key="delete_all_profile"):
-                st.session_state.modal_user_profile.clear()
-                st.success("All entries deleted!")
-                st.rerun()
-        
-        with col3:
-            if st.session_state.section_locked:
-                st.info("🔒 Section is locked - use Save/Cancel buttons in sidebar")
+        render_improved_list_editor(
+            section_key="user_profile",
+            config_key="USER_PROFILE",
+            title="📝 What Chatty Knows About You",
+            instructions="Tell Chatty about the user in short paragraphs or sentences. Click 'Edit Mode' to make changes.",
+            item_label="Profile Entry"
+        )
         
         st.markdown("</div>", unsafe_allow_html=True)
     
@@ -772,64 +928,19 @@ else:  # Configuration stage
         
         st.markdown("</div>", unsafe_allow_html=True)
     
-    elif current_section == 'notes':  # Notes Section
+    elif current_section == 'notes':
         st.markdown("<div class='config-section'>", unsafe_allow_html=True)
-        st.subheader("📋 Pre-Escalation Notes")
         
-        # Instructions
-        st.info("💡 **Instructions:** Add important notes that should be considered before escalating to a supervisor. Type new entries below and click **ADD NOTE**. Be sure to click **SAVE NOTES** when done!")
-        
-        # Initialize notes in session state if not exists
-        if 'modal_notes' not in st.session_state:
-            st.session_state.modal_notes = st.session_state.config_manager.get_config('PRIOR_PRE_ESCALATION_NOTES') or []
-        
-        notes = st.session_state.modal_notes
-        
-        # Display existing notes
-        for i, note in enumerate(notes):
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                updated_note = st.text_area(f"Note {i+1}", value=note, key=f"note_{i}")
-                if updated_note != note:
-                    st.session_state.modal_notes[i] = updated_note
-            with col2:
-                st.write("")  # Spacing
-                st.write("")  # More spacing
-                if st.button("🗑️", key=f"delete_note_{i}", help="Delete this note"):
-                    st.session_state.modal_notes.pop(i)
-                    st.rerun()
-        
-        # Add new note
-        new_note = st.text_area("Add New Note", key="new_note_entry")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("➕ Add Note", key="add_note_entry"):
-                if new_note.strip():
-                    st.session_state.modal_notes.append(new_note.strip())
-                    st.success("Note added!")
-                    st.rerun()
-        
-        with col2:
-            if st.button("🗑️ Delete All", key="delete_all_notes"):
-                st.session_state.modal_notes.clear()
-                st.success("All notes deleted!")
-                st.rerun()
-        
-        with col3:
-            if st.button("💾 Save Notes", type="primary", key="save_notes"):
-                success, message = st.session_state.config_manager.save_config({
-                    'PRIOR_PRE_ESCALATION_NOTES': st.session_state.modal_notes,
-                    'LAST_CONFIG_EDIT_TIME': time.time()
-                })
-                if success:
-                    st.success("✅ Notes saved!")
-                else:
-                    st.error(f"❌ Error saving notes: {message}")
+        render_improved_list_editor(
+            section_key="notes",
+            config_key="PRIOR_PRE_ESCALATION_NOTES",
+            title="📋 Pre-Escalation Notes",
+            instructions="This area holds notes that you AND the AI supervisor create to document observations about the user's experience.  Use this area to hold notes that are not actively part of the Chatty Friend conversation but should be kept in context for escalation of concerns over time.  Remove notes created by the supervisor that are not appropriate for ongoing consideration if needed.",
+            item_label="Note"
+        )
         
         st.markdown("</div>", unsafe_allow_html=True)
-    
+            
     elif current_section == 'contacts':  # Contacts Section
         st.markdown("<div class='config-section'>", unsafe_allow_html=True)
         st.subheader("👥 Manage Contacts")
@@ -877,8 +988,7 @@ else:  # Configuration stage
         
         if st.button("💾 Save Contacts", type="primary", key="save_contacts"):
             success, message = st.session_state.config_manager.save_config({
-                'CONTACTS': st.session_state.modal_contacts,
-                'LAST_CONFIG_EDIT_TIME': time.time()
+                'CONTACTS': st.session_state.modal_contacts
             })
             if success:
                 st.success("✅ Contacts saved!")
@@ -902,8 +1012,7 @@ else:  # Configuration stage
             if new_password and new_password == confirm_password:
                 success, message = st.session_state.config_manager.save_config({
                     'CONFIG_PASSWORD': new_password,
-                    'CONFIG_PASSWORD_HINT': hint,
-                    'LAST_CONFIG_EDIT_TIME': time.time()
+                    'CONFIG_PASSWORD_HINT': hint
                 })
                 if success:
                     st.success("✅ Password changed successfully!")
@@ -938,16 +1047,15 @@ else:  # Configuration stage
                         # Save WiFi configuration
                         success, message = st.session_state.config_manager.save_config({
                             'WIFI_SSID': new_ssid.strip(),
-                            'WIFI_PASSWORD': new_password.strip(),
-                            'LAST_CONFIG_EDIT_TIME': time.time()
+                            'WIFI_PASSWORD': new_password.strip()
                         })
                         
                         if success:
                             st.success("✅ WiFi settings saved! System will restart...")
                             time.sleep(2)
                             # On Pi, restart the system
-                            import subprocess
-                            subprocess.run(['sudo', 'reboot'], check=False)
+                            if not TESTING_PI_UI_MOCK_SYSTEM_CALLS:
+                                subprocess.run(['sudo', 'reboot'], check=False)
                         else:
                             st.error(f"❌ Error saving WiFi settings: {message}")
                     else:
@@ -996,8 +1104,7 @@ else:  # Configuration stage
                         'REALTIME_MODEL': realtime_model.strip(),
                         'AUDIO_TRANSCRIPTION_MODEL': transcription_model.strip(),
                         'SUPERVISOR_MODEL': supervisor_model.strip(),
-                        'WS_URL': ws_url.strip(),
-                        'LAST_CONFIG_EDIT_TIME': time.time()
+                        'WS_URL': ws_url.strip()
                     })
                     if success:
                         st.success("✅ AI settings saved!")
@@ -1071,8 +1178,7 @@ else:  # Configuration stage
                 'VOICE': selected_voice,
                 'VOLUME': volume,
                 'SPEED': speed,
-                'ASSISTANT_EAGERNESS_TO_REPLY': eagerness,
-                'LAST_CONFIG_EDIT_TIME': time.time()
+                'ASSISTANT_EAGERNESS_TO_REPLY': eagerness
             })
             if success:
                 st.success("✅ Personality settings saved!")
@@ -1098,8 +1204,7 @@ else:  # Configuration stage
         
         if st.button("💾 Save Content Settings", type="primary", key="save_content"):
             config_updates = {
-                'NEWS_PROVIDER': news_provider,
-                'LAST_CONFIG_EDIT_TIME': time.time()
+                'NEWS_PROVIDER': news_provider
             }
             success, message = st.session_state.config_manager.save_config(config_updates)
             if success:
@@ -1146,8 +1251,7 @@ else:  # Configuration stage
             success, message = st.session_state.config_manager.save_config({
                 'VAD_THRESHOLD': vad_threshold,
                 'WAKE_WORD_THRESHOLD': wake_word_threshold,
-                'SECONDS_TO_WAIT_FOR_MORE_VOICE': voice_wait_time,
-                'LAST_CONFIG_EDIT_TIME': time.time()
+                'SECONDS_TO_WAIT_FOR_MORE_VOICE': voice_wait_time
             })
             if success:
                 st.success("✅ Voice tech settings saved!")
@@ -1208,33 +1312,61 @@ else:  # Configuration stage
         st.markdown("<div class='config-section'>", unsafe_allow_html=True)
         st.subheader("🔄 Reset to Defaults")
         
-        st.warning("⚠️ **Warning:** This will reset ALL configuration settings to their default values!")
+        st.error("⚠️ **DANGER ZONE** ⚠️")
+        st.warning("This will reset ALL configuration settings to their default values!")
         st.info("💡 **Note:** This will not affect your API keys or secrets - only configuration settings.")
         
-        confirm_reset = st.checkbox("I understand this will reset all settings", key="confirm_reset")
-        
-        if st.button("🔄 Reset to Defaults", type="primary", disabled=not confirm_reset, key="reset_defaults"):
+        with st.form("reset_form"):
+            # Step 1: Checkbox
+            confirm_reset = st.checkbox("I understand this will reset all settings")
+            
+            # Step 2: Type confirmation
+            st.write("**Type the word** `RESET` **below to confirm:**")
+            typed_confirmation = st.text_input("Type RESET here:")
+            
+            # Step 3: Show what will be preserved
             if confirm_reset:
-                # Reset to defaults (preserving secrets)
-                from chatty_config import ConfigManager
-                default_config = ConfigManager().default_config
-                
-                # Preserve certain settings
-                preserve_keys = ['CONFIG_PASSWORD', 'CONFIG_PASSWORD_HINT', 'LAST_CONFIG_EDIT_TIME']
-                preserved = {key: st.session_state.config_manager.get_config(key) for key in preserve_keys if st.session_state.config_manager.get_config(key)}
-                
-                # Merge defaults with preserved settings
-                reset_config = {**default_config, **preserved}
-                reset_config['LAST_CONFIG_EDIT_TIME'] = time.time()
-                
-                success, message = st.session_state.config_manager.save_config(reset_config, replace_all=True)
-                if success:
-                    st.success("✅ Configuration reset to defaults!")
-                    time.sleep(1)
-                    st.rerun()
+                st.info("**These settings will be preserved:**")
+                st.write("- CONFIG_PASSWORD")
+                st.write("- CONFIG_PASSWORD_HINT")
+                st.write("- All API keys and secrets")
+            
+            # Reset button
+            submitted = st.form_submit_button(
+                "🔄 Reset to Defaults", 
+                type="primary"
+            )
+            
+            if submitted:
+                if not confirm_reset:
+                    st.error("❌ Please check the confirmation box")
+                elif typed_confirmation != "RESET":
+                    st.error("❌ Please type RESET exactly")
                 else:
-                    st.error(f"❌ Error resetting configuration: {message}")
+                    # Do the reset
+                    from chatty_config import ConfigManager
+                    default_config = ConfigManager().default_config
+                    
+                    # Preserve certain settings
+                    preserve_keys = ['CONFIG_PASSWORD', 'CONFIG_PASSWORD_HINT']
+                    preserved = {key: st.session_state.config_manager.get_config(key) 
+                                for key in preserve_keys 
+                                if st.session_state.config_manager.get_config(key)}
+                    
+                    # Merge defaults with preserved settings
+                    reset_config = {**default_config, **preserved}
+                    
+                    # Just save the reset config normally
+                    success, message = st.session_state.config_manager.save_config(reset_config)
+                    if success:
+                        st.success("✅ Configuration reset to defaults!")
+                        st.balloons()
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Error resetting configuration: {message}")
         
+        # System restart section
         if IS_PI:
             st.divider()
             st.subheader("🔄 System Restart")
@@ -1243,8 +1375,8 @@ else:  # Configuration stage
             if st.button("🔄 Restart System", key="restart_system", type="secondary"):
                 st.warning("🔄 System is restarting...")
                 time.sleep(2)
-                import subprocess
-                subprocess.run(['sudo', 'reboot'], check=False)
+                if not TESTING_PI_UI_MOCK_SYSTEM_CALLS:
+                    subprocess.run(['sudo', 'reboot'], check=False)
         
         st.markdown("</div>", unsafe_allow_html=True)
     

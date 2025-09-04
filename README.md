@@ -542,7 +542,7 @@ d. Configure system settings:
 # Sync the git repo for Chatty Friend to your pi
 **run this from terminal on the pi:**
 - git clone https://github.com/Chapplication/chatty-friend.git
-- cd chatt-friend
+- cd chatty-friend
 - bash install_chatty_friend_prereqs.sh (Provide the password you created earlier (for the user) and Answer 'yes' when prompted repeatedly, will take some time)
 - bin/streamlit run chatty_web.py (wait a few seconds, will bring up the web interface to configure chatty friend)
 - enter "assistant" which is the default password on the browser screen
@@ -555,6 +555,7 @@ Enable the hotspot and Reboot the Pi.  You can now run it headless.
 - On your development machine point a browser to: 10.42.0.1
 - in the browser configure the WiFi SSID and Wifi password that you want it to use for normal operation
 - in the browser login with 'assistant' and change the password for Chatty Friend administtration
+- spend some time on https://www.openai.fm/ to figure out how you want chatty friend to sound
 - in the browser Configure the Chatty Friend.  Personality, voice, speed, volume, supervisor characteristics.
   - Special attention should be paid to supervisor instructions if there is concern that a user may engage
     in deluded thinkining with their companion, such as assigning a human "self" to the AI companion or 
