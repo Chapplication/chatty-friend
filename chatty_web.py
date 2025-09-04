@@ -19,7 +19,7 @@ import subprocess
 from chatty_wifi import IS_PI, IS_MAC, is_online
 
 # DO NOT COMMIT THIS True!!!
-TESTING_PI_UI_MOCK_SYSTEM_CALLS = True
+TESTING_PI_UI_MOCK_SYSTEM_CALLS = False
 if TESTING_PI_UI_MOCK_SYSTEM_CALLS:
     IS_PI = True
     IS_MAC = False
