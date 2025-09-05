@@ -77,6 +77,8 @@ Get Chatty Friend running in QA/test mode on mac quickly:
    THEN CLOSE THE TERMINAL WINDOW AND RE-OPEN
    Finally,
    ```bash
+   brew install portaudio
+   uv pip install 
    uv sync
    ```
 

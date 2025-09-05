@@ -25,10 +25,9 @@ class WakeWordDetector:
         self.wake_to_wake_min_time = 5.0
         self.master_state = master_state
 
-        wake_word_model = master_state.conman.get_wake_word_model()
+        base_assistant_name = master_state.conman.get_wake_word_model()
         if OpenWakewordModel and wake_word_model:
             oww = None
-            base_assistant_name = master_state.conman.get_config("WAKE_WORD_MODEL").rsplit(".",1)[0]
             for extension in ["tflite", "onnx"]:
                 try:
                     wake_word_file = "./"+base_assistant_name +"."+ extension
