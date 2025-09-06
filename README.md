@@ -84,7 +84,7 @@ Get Chatty Friend running in QA/test mode on mac quickly:
 
 3. **Set your OpenAI API key**
    ```bash
-   export CHAT_API_KEY="sk-proj-your-openai-api-key-here"
+   export CHAT_API_KEY=sk-proj-your-openai-api-key-here
    ```
 
 4. **Open the Config Web Page**

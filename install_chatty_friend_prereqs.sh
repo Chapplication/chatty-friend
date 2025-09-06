@@ -14,6 +14,9 @@ bin/pip install Wikipedia
 bin/pip install openwakeword==0.6.0 --force-reinstall --no-deps
 bin/pip install websockets
 bin/pip install feedparser
+bin/pip install onnxruntime
+bin/pip install scipy
+bin/pip install scikit-learn
 
 sudo apt-get install flac
 sudo apt-get install libreta pico-utils
@@ -71,3 +74,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable start_chatty.service
 sudo cp run_chatty.sh /etc/profile.d
 sudo chmod +x /etc/profile.d/run_chatty.sh
+
+# disable swapping mem to SD card - helps with corruption issues
+sudo dphys-swapfile swapoff
+sudo systemctl disable dphys-swapfile.service
+sudo apt-get remove dphys-swapfile

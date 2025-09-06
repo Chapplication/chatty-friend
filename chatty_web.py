@@ -433,7 +433,7 @@ if IS_PI and not st.session_state.authentication_time:
                     subprocess.run(['sudo', 'reboot'], check=False)
 
     # we're online, require recent authentication
-    elif not st.session_state.authentication_time:
+    else:
         st.markdown("<h1 class='main-header'>🔐 Authentication</h1>", unsafe_allow_html=True)
         
         password_hint = st.session_state.config_manager.get_config('CONFIG_PASSWORD_HINT') or "No hint available"
