@@ -1,0 +1,12 @@
+[Unit]
+Description=Create log directories on tmpfs
+Before=rsyslog.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/create-log-dirs.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

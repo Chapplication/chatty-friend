@@ -546,6 +546,14 @@ d. Configure system settings:
 - git clone https://github.com/Chapplication/chatty-friend.git
 - cd chatty-friend
 - bash install_chatty_friend_prereqs.sh (Provide the password you created earlier (for the user) and Answer 'yes' when prompted repeatedly, will take some time)
+- edit /etc/fstab to disable swapping to the SD card by adding at the end:
+   tmpfs /tmp tmpfs defaults,noatime,nosuid,nodev,noexec,mode=1777,size=256M 0 0
+   tmpfs /var/log tmpfs defaults,noatime,nosuid,nodev,noexec,mode=0755,size=256M 0 0
+   tmpfs /var/tmp tmpfs defaults,noatime,nosuid,nodev,size=64M 0 0
+- edit /etc/systemd/journald.conf to disable logging to the SD card by adding:
+   Storage=volatile
+   RuntimeMaxUse=64M
+   RuntimeMaxFileSize=8M
 - bin/streamlit run chatty_web.py (wait a few seconds, will bring up the web interface to configure chatty friend)
 - enter "assistant" which is the default password on the browser screen
 

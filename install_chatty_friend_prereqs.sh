@@ -75,7 +75,11 @@ sudo systemctl enable start_chatty.service
 sudo cp run_chatty.sh /etc/profile.d
 sudo chmod +x /etc/profile.d/run_chatty.sh
 
-# disable swapping mem to SD card - helps with corruption issues
-sudo dphys-swapfile swapoff
-sudo systemctl disable dphys-swapfile.service
-sudo apt-get remove dphys-swapfile
+# create a new log directory service to ensure they are always present:
+sudo cp create-log-dirs.service /etc/systemd/system
+sudo chmod 664 /etc/systemd/system/create-log-dirs.service
+sudo systemctl daemon-reload
+
+sudo cp create-log-dirs.sh /usr/local/bin
+sudo chmod +x /usr/local/bin/create-log-dirs.sh
+sudo systemctl enable create-log-dirs.service
