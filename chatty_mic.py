@@ -26,7 +26,7 @@ class WakeWordDetector:
         self.master_state = master_state
 
         base_assistant_name = master_state.conman.get_wake_word_model()
-        if OpenWakewordModel and wake_word_model:
+        if OpenWakewordModel and base_assistant_name:
             oww = None
             for extension in ["tflite", "onnx"]:
                 try:
