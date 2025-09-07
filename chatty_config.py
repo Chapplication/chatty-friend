@@ -212,17 +212,15 @@ class ConfigManager:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     try:
                         self.config = json.load(f)
+                        if not isinstance(self.config, dict):
+                            print(f"Warning: {self.config_file} should contain a JSON dict object")
+                        else:
+                            loaded = True
+                            print(f"Loaded config from {self.config_file}")
                     except json.JSONDecodeError as e:
                         print(f"Error: Invalid JSON in {self.config_file}: {e}")
-                    if not isinstance(self.config, dict):
-                        print(f"Warning: {self.config_file} should contain a JSON dict object")
-                print(f"Loaded config from {self.config_file}")
-
-                loaded = True
             else:
                 print(f"Config file {self.config_file} not found")
-        except json.JSONDecodeError as e:
-            print(f"Error: Invalid JSON in {self.config_file}: {e}")
         except Exception as e:
             print(f"Error loading config from {self.config_file}: {e}")
 
@@ -247,6 +245,7 @@ class ConfigManager:
         missing_keys.extend(["CHATTY_FRIEND_VERSION"])
 
         if missing_keys:
+            print("missing keys: ", missing_keys)
             self.save_config({k: default_config[k] for k in missing_keys}, merge=False)
 
     def save_config(self, updated_config: dict=None, merge=True) -> tuple[bool, str]:

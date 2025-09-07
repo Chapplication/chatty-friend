@@ -1,6 +1,6 @@
 # Chatty Friend 🎙️
 
-A smart speaker companion for senior citizens, powered by AI and running on Raspberry Pi.
+A smart speaker companion for senior citizens, powered by AI and running on Raspberry Pi.  Running as a realtime voice agent in the OpenAI framework.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
