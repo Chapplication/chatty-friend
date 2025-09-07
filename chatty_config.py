@@ -348,12 +348,12 @@ class ConfigManager:
             return self.get_config("RESUME_CONTEXT")
         return None
 
-    def make_contact(self, name, type, email, phone):
+    def make_contact(self, name, conact_type, email, phone):
         return {
-            "name": name,
-            "type": type,
-            "email": email,
-            "phone": phone
+            "name": str(name).strip(),
+            "type": str(conact_type).strip(),
+            "email": str(email).strip(),
+            "phone": str(phone).strip()
         }
 
     def get_contacts(self) -> Optional[list[str]]:
