@@ -220,14 +220,6 @@ class ConfigManager:
                         return False
                 print(f"Loaded config from {self.config_file}")
 
-                # align existing settings after upgrade - make sure the model is still supported
-                if "REALTIME_MODEL" not in self.config or self.config["REALTIME_MODEL"] not in default_config["VOICE_CHOICES"]:
-                    self.config["REALTIME_MODEL"] = default_config["REALTIME_MODEL"]
-
-                # set voice choices to the ones the model supports
-                self.config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]]
-                self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[default_config["REALTIME_MODEL"]]
-
                 loaded = True
             else:
                 print(f"Config file {self.config_file} not found")
@@ -238,24 +230,27 @@ class ConfigManager:
 
         if loaded:
             missing_keys = [k for k in default_config.keys() if k not in self.config]
-
-            # version is in the config so the website can see it but force sync to the code here
-            missing_keys.extend(["CHATTY_FRIEND_VERSION"])
         else:
             # blank config... load it all
             self.config = {}
             missing_keys = default_config.keys()
 
+        # align existing settings after upgrade - make sure the model is still supported
+        if "REALTIME_MODEL" not in self.config or self.config["REALTIME_MODEL"] not in default_config["VOICE_CHOICES"] or self.config["REALTIME_MODEL"] not in default_config["TOKEN_COST_PER_MILLION"]:
+            missing_keys.append("REALTIME_MODEL")
+            missing_keys.append("VOICE_CHOICES")
+            missing_keys.append("TOKEN_COST_PER_MILLION")
+        else:
+            # force sync up cost and voice choices based on the model selected
+            self.config["VOICE_CHOICES"] = voice_choices[self.config["REALTIME_MODEL"]]
+            self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[self.config["REALTIME_MODEL"]]
+
+        # version is in the config so the website can see it but force sync to the code here
+        missing_keys.extend(["CHATTY_FRIEND_VERSION"])
+
         if missing_keys:
             self.save_config({k: default_config[k] for k in missing_keys}, merge=False)
 
-        # force sync up cost and voice choices based on the model selected
-        if self.config["REALTIME_MODEL"] not in voice_choices:
-            self.config["REALTIME_MODEL"] = default_config["REALTIME_MODEL"]
-
-        self.config["VOICE_CHOICES"] = voice_choices[self.config["REALTIME_MODEL"]] if self.config["REALTIME_MODEL"] in voice_choices else voice_choices[list(voice_choices.keys())[0]]
-        self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[self.config["REALTIME_MODEL"]] if self.config["REALTIME_MODEL"] in cost_sheet_per_million else cost_sheet_per_million[list(cost_sheet_per_million.keys())[0]]
-        
     def save_config(self, updated_config: dict=None, merge=True) -> tuple[bool, str]:
 
         """Save config to file"""
