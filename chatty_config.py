@@ -214,10 +214,8 @@ class ConfigManager:
                         self.config = json.load(f)
                     except json.JSONDecodeError as e:
                         print(f"Error: Invalid JSON in {self.config_file}: {e}")
-                        return False
                     if not isinstance(self.config, dict):
                         print(f"Warning: {self.config_file} should contain a JSON dict object")
-                        return False
                 print(f"Loaded config from {self.config_file}")
 
                 loaded = True
@@ -242,8 +240,8 @@ class ConfigManager:
             missing_keys.append("TOKEN_COST_PER_MILLION")
         else:
             # force sync up cost and voice choices based on the model selected
-            self.config["VOICE_CHOICES"] = voice_choices[self.config["REALTIME_MODEL"]]
-            self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[self.config["REALTIME_MODEL"]]
+            self.config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]]
+            self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[default_config["REALTIME_MODEL"]]
 
         # version is in the config so the website can see it but force sync to the code here
         missing_keys.extend(["CHATTY_FRIEND_VERSION"])
@@ -263,10 +261,9 @@ class ConfigManager:
             # Merge with existing config (update/add new keys, preserve existing ones)
             if merge:
                 self.load_config()
-                merged_config = self.config.copy()
-                merged_config.update(updated_config)
-            else:
-                merged_config = updated_config
+
+            merged_config = self.config.copy()
+            merged_config.update(updated_config)
 
             # Save merged config to file
             with open(self.config_file, 'w', encoding='utf-8') as f:
