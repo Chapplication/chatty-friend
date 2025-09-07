@@ -8,6 +8,8 @@ from typing import Optional, Dict, Any
 import time
 from datetime import datetime
 
+CHATTY_FRIEND_VERSION_NUMBER = "0.1.5"
+
 def get_current_date_string(with_time=False):
 	return datetime.now().strftime("%Y-%m-%d" + (" %H:%M:%S" if with_time else ""))
 
@@ -30,7 +32,6 @@ cost_sheet_per_million = {
     }
 }
 
-CHATTY_FRIEND_VERSION_NUMBER = "0.1.4"
 
 
 profile_suggestions = """
@@ -201,28 +202,11 @@ class ConfigManager:
         self.config_file = config_file
         self.config = {}
         self.default_config = default_config
+        self.load_config()
 
-        if self.load_config():
-            missing_keys = [k for k in default_config.keys() if k not in self.config]
-
-            # version is in the config so the website can see it but force sync to the code here
-            missing_keys.extend(["CHATTY_FRIEND_VERSION"])
-        else:
-            # blank config... load it all
-            self.config = {}
-            missing_keys = default_config.keys()
-
-        if missing_keys:
-            self.save_config({k: default_config[k] for k in missing_keys})
-
-        # force sync up cost and voice choices based on the model selected
-        if self.config["REALTIME_MODEL"] not in voice_choices:
-            self.config["REALTIME_MODEL"] = default_config["REALTIME_MODEL"]
-
-        self.config["VOICE_CHOICES"] = voice_choices[self.config["REALTIME_MODEL"]] if self.config["REALTIME_MODEL"] in voice_choices else voice_choices[list(voice_choices.keys())[0]]
-        self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[self.config["REALTIME_MODEL"]] if self.config["REALTIME_MODEL"] in cost_sheet_per_million else cost_sheet_per_million[list(cost_sheet_per_million.keys())[0]]
         
-    def load_config(self) -> bool:
+    def load_config(self):
+        loaded = False
         try:
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
@@ -244,18 +228,35 @@ class ConfigManager:
                 self.config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]]
                 self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[default_config["REALTIME_MODEL"]]
 
-                return True
+                loaded = True
             else:
                 print(f"Config file {self.config_file} not found")
-                return False
         except json.JSONDecodeError as e:
             print(f"Error: Invalid JSON in {self.config_file}: {e}")
-            return False
         except Exception as e:
             print(f"Error loading config from {self.config_file}: {e}")
-            return False
-    
-    def save_config(self, updated_config: dict=None) -> tuple[bool, str]:
+
+        if loaded:
+            missing_keys = [k for k in default_config.keys() if k not in self.config]
+
+            # version is in the config so the website can see it but force sync to the code here
+            missing_keys.extend(["CHATTY_FRIEND_VERSION"])
+        else:
+            # blank config... load it all
+            self.config = {}
+            missing_keys = default_config.keys()
+
+        if missing_keys:
+            self.save_config({k: default_config[k] for k in missing_keys}, merge=False)
+
+        # force sync up cost and voice choices based on the model selected
+        if self.config["REALTIME_MODEL"] not in voice_choices:
+            self.config["REALTIME_MODEL"] = default_config["REALTIME_MODEL"]
+
+        self.config["VOICE_CHOICES"] = voice_choices[self.config["REALTIME_MODEL"]] if self.config["REALTIME_MODEL"] in voice_choices else voice_choices[list(voice_choices.keys())[0]]
+        self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[self.config["REALTIME_MODEL"]] if self.config["REALTIME_MODEL"] in cost_sheet_per_million else cost_sheet_per_million[list(cost_sheet_per_million.keys())[0]]
+        
+    def save_config(self, updated_config: dict=None, merge=True) -> tuple[bool, str]:
 
         """Save config to file"""
         try:
@@ -265,8 +266,12 @@ class ConfigManager:
                 return False, "Config must be a JSON object (dictionary)"
             
             # Merge with existing config (update/add new keys, preserve existing ones)
-            merged_config = self.config.copy()  # Start with existing config
-            merged_config.update(updated_config)    # Add/update with new config
+            if merge:
+                self.load_config()
+                merged_config = self.config.copy()
+                merged_config.update(updated_config)
+            else:
+                merged_config = updated_config
 
             # Save merged config to file
             with open(self.config_file, 'w', encoding='utf-8') as f:
