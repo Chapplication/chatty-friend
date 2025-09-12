@@ -229,7 +229,7 @@ class ConfigManager:
         else:
             # blank config... load it all
             self.config = {}
-            missing_keys = default_config.keys()
+            missing_keys = list(default_config.keys())
 
         # align existing settings after upgrade - make sure the model is still supported
         if "REALTIME_MODEL" not in self.config or self.config["REALTIME_MODEL"] not in default_config["VOICE_CHOICES"] or self.config["REALTIME_MODEL"] not in default_config["TOKEN_COST_PER_MILLION"]:
