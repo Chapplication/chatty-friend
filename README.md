@@ -102,6 +102,7 @@ Get Chatty Friend running in QA/test mode on mac quickly:
    wake word detection only works in headless mode on raspberry Pi where there is a lot of control over audio and system resources.
    On Mac, use keboard "push to talk" with the space bar to simulate VAD, and use W key to simulate wake word detection.
    This also allows for fast interactive prompt development as you don't have to go through the sleep/supervise cycle to iterate.
+   NOTE: I have not adapted the OpenWakeWord handling to work on platforms other than the raspberry Pi, but in theory it should work.  be sure to run init_oww_models.py to load all the models it expects for voice detection etc.
 
 5. **Talk to Chatty** - Hold `space` and speak (push-to-talk mode)
 
@@ -281,7 +282,7 @@ On Raspberry Pi, sessions automatically timeout after 10 minutes of inactivity, 
 - install chatty friend using the Pi image instructions (see deployment instructions below)
 - boot the Pi and attach an external device (phone/browser) to the hotspot it provides (chatty / assistant)
 - point your browser to 10.42.0.1 and configure:
-   - provide a wifi SSID and Wifi Password for it to use insteasd of its hotspot
+   - provide a wifi SSID and Wifi Password for it to use instead of its hotspot
    - enter the default password chatty friend password 'assistant'
    - configure a new password
    - configure a primary email contact and email server credentials
@@ -497,7 +498,7 @@ The architecture evolves through layers of complexity, starting simple and addin
 
 ## 🍓 Raspberry Pi Installation Guide
 
-This guide covers setting up Chatty Friend as a headless smart speaker on a Raspberry Pi.  You can execute these steps and get everything set up as you want, then duplicate the SD card to make additional units.
+This guide covers setting up Chatty Friend as a headless smart speaker on a Raspberry Pi.  You can execute these steps and get everything set up as you want, then duplicate the SD card to make additional units.  Because of power failure issues I recommend using an industrial grade SD card but opinions on that are mixed.
 
 ### Prerequisites
 
@@ -530,7 +531,7 @@ b. Complete Ubuntu setup with these settings:
 c. Take the following steps on ubuntu
    - **Check for Updates**: Run "software updater" and get the latest.  reboot if needed
    - **Screen Blank**: Disable screen blank in settings->privacy->screen blank delay->Never
-   - **Hot Spotk**: settings->Wifi->hotspot create SSID and Password for your hotspot.  turn it on (snap the QR code now if you want) and back off again.
+   - **Hot Spot**: settings->Wifi->hotspot create SSID and Password for your hotspot.  turn it on (snap the QR code now if you want) and back off again.
    - **Important**: Enable auto Log-in settings->system->users->chatty->unlock->Automatic Login
 
 d. Configure system settings:
@@ -543,17 +544,10 @@ d. Configure system settings:
 
 # Sync the git repo for Chatty Friend to your pi
 **run this from terminal on the pi:**
+- sudo apt intsall git
 - git clone https://github.com/Chapplication/chatty-friend.git
 - cd chatty-friend
 - bash install_chatty_friend_prereqs.sh (Provide the password you created earlier (for the user) and Answer 'yes' when prompted repeatedly, will take some time)
-- edit /etc/fstab to disable swapping to the SD card by adding at the end:
-   tmpfs /tmp tmpfs defaults,noatime,nosuid,nodev,noexec,mode=1777,size=256M 0 0
-   tmpfs /var/log tmpfs defaults,noatime,nosuid,nodev,noexec,mode=0755,size=256M 0 0
-   tmpfs /var/tmp tmpfs defaults,noatime,nosuid,nodev,size=64M 0 0
-- edit /etc/systemd/journald.conf to disable logging to the SD card by adding:
-   Storage=volatile
-   RuntimeMaxUse=64M
-   RuntimeMaxFileSize=8M
 - bin/streamlit run chatty_web.py (wait a few seconds, will bring up the web interface to configure chatty friend)
 - enter "assistant" which is the default password on the browser screen
 

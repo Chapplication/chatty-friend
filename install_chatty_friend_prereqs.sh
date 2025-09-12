@@ -83,3 +83,5 @@ sudo systemctl daemon-reload
 sudo cp create-log-dirs.sh /usr/local/bin
 sudo chmod +x /usr/local/bin/create-log-dirs.sh
 sudo systemctl enable create-log-dirs.service
+
+sudo bash apply_ram_drive.sh
