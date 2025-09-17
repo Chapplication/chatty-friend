@@ -7,7 +7,7 @@ from chatty_send_audio import stream_to_assistant
 from chatty_speaker import speaker_player
 from chatty_state import ChattyMasterState
 from chatty_realtime_messages import *
-from chatty_wifi import is_online
+from chatty_wifi import is_online, what_is_my_ip
 
 from chatty_config import USER_SAID_WAKE_WORD, USER_STARTED_SPEAKING, ASSISTANT_STOP_SPEAKING, MASTER_EXIT_EVENT, ASSISTANT_RESUME_AFTER_AUTO_SUMMARY
 from chatty_config import SPEAKER_PLAY_TONE, CHATTY_SONG_STARTUP, CHATTY_SONG_AWAKE
@@ -16,7 +16,7 @@ from chatty_config import NORMAL_EXIT, UPGRADE_EXIT
 from typing import Any
 import asyncio
 import time
-
+import os
 WAKE_UP_INSTRUCTIONS = "The user has just asked you to come online.  Provide a brief greeting please."
 SUMMARY_INSTRUCTIONS = "You were talking to the user and then you went offline.  You are now back online.  Let them know you're back."
 
@@ -96,17 +96,37 @@ async def assistant_go_live():
     loop_forever = True
     just_rebooted = True
 
-    master_state = ChattyMasterState()
+    async def do_early_exit(message):
+        print(message)
+        try:
+            os.system("espeak -v en-us -a 20 '"+message+"'")
+        except Exception as e:
+            print(f"❌ Error in do_early_exit: {e}")
+        await asyncio.sleep(10)
+        exit(NORMAL_EXIT)
 
-    import os
     if not is_online():
-        message = "Cannot find Wifi.  please connect to the device hotspot and browse to 10 dot 42 dot 0 dot 1 to configure."
-    else:
-        message = "Chatty Friend is named " + master_state.conman.get_config("WAKE_WORD_MODEL")
-    os.system("espeak -v en-us -a 20 '"+message+"'")
+       await do_early_exit("Cannot find Wifi.  please connect to the device hotspot and browse to 10 dot 42 dot 0 dot 1 to configure.")
+
+    where_to_connect = what_is_my_ip() or "Not Known"
+    where_to_connect = " dot ".join(where_to_connect.split("."))
+
+    try:
+        master_state = ChattyMasterState()
+    except Exception as e:
+        print(f"❌ Error in assistant_go_live: {e}")
+        import traceback
+        traceback.print_exc()
+        await do_early_exit("No OpenAI API key found.  Connect to " + where_to_connect + " and enter your API key.")
+
+    welcome_message = "Chatty Friend is named " + master_state.conman.get_config("WAKE_WORD_MODEL")
+    welcome_message += ".  Connect to the wifi network " + master_state.conman.get_config("WIFI_SSID") + " and browse to " + where_to_connect + " to configure."
+
+    os.system("espeak -v en-us -a 20 '"+welcome_message+"'")
 
     is_automated_restart_after_summary = False
 
+    # main audio server loop
     while loop_forever:
 
         # set up the managers:

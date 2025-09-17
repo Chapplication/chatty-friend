@@ -49,8 +49,13 @@ class ChattyMasterState:
         self.conman = ConfigManager()
         self.secrets_manager = SecretsManager()
 
-        self.openai = OpenAI(api_key=self.secrets_manager.get_secret("chat_api_key"))
-        self.async_openai = AsyncOpenAI(api_key=self.secrets_manager.get_secret("chat_api_key"))
+        openai_api_key = self.secrets_manager.get_secret("chat_api_key")
+        if not openai_api_key:
+            
+            raise Exception("No OpenAI API key found")
+
+        self.openai = OpenAI(api_key=openai_api_key)
+        self.async_openai = AsyncOpenAI(api_key=openai_api_key)
         self.pa = pyaudio.PyAudio()
 
         self._data_lock = threading.RLock()

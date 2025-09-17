@@ -5,6 +5,7 @@ IS_PI = platform.machine().lower() in ['armv6l', 'armv7l', 'aarch64'] and platfo
 IS_MAC = platform.system().lower() == 'darwin'
 import subprocess
 import time
+import socket
 
 
 
@@ -29,6 +30,21 @@ def start_hotspot_mode(no_calls=False):
     except Exception as e:
         print(f"Error starting hotspot mode: {e}")
         pass
+
+def what_is_my_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(0)
+    try:
+        # doesn't even have to be reachable
+        s.connect(('10.254.254.254', 1))
+        IP = s.getsockname()[0]
+    except Exception as e:
+        print(f"Warning: Error getting IP address: {e}")
+        IP = None
+    finally:
+        s.close()
+    return IP
+
 
 import os
 import subprocess
@@ -81,7 +97,7 @@ def connect_to_wifi(ssid, password):
     interface = get_wifi_interface()
     
     # Scan for networks
-    speak("Scanning")
+    speak("Now Scanning")
     os.system("nmcli device wifi rescan")
     time.sleep(5)
     
@@ -102,7 +118,7 @@ def connect_to_wifi(ssid, password):
         result = subprocess.run(cmd, shell=True, capture_output=True)
         
         if result.returncode != 0:
-            speak("Failed to create connection profile")
+            speak("Failed to create connection")
             return False
     
     # Try to connect
@@ -111,7 +127,9 @@ def connect_to_wifi(ssid, password):
                           shell=True, capture_output=True)
     
     if result.returncode == 0:
-        speak("WiFi connected successfully")
+        ip = what_is_my_ip() or "Not Known"
+        ip_string = " dot ".join(ip.split("."))
+        speak(f"WiFi connected successfully.  Configure at {ip_string}")
         return True
     else:
         speak("WiFi connection failed")

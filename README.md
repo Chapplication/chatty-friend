@@ -489,8 +489,8 @@ The architecture evolves through layers of complexity, starting simple and addin
 
 ### Recommended Hardware
 
-- **Raspberry Pi**: Model 4B (4GB or 8GB RAM)
-- **SD Card**: 32GB minimum, Class 10
+- **Raspberry Pi**: Model 5 (4GB or 8GB RAM)
+- **SD Card**: 16GB minimum, recommend "industrial" grade for power failure tolerance
 - **Speakerphone**: Jabra Speak 410/510 (tested)
 - **Power Supply**: Official USB-C adapter (5V, 3A)
 
@@ -502,9 +502,9 @@ This guide covers setting up Chatty Friend as a headless smart speaker on a Rasp
 
 ### Prerequisites
 
-- Raspberry Pi 4 (4GB or 8GB recommended)
-- MicroSD card (32GB minimum)
-- USB speakerphone (Jabra Speak 410/510 tested)
+- Raspberry Pi 5 (4GB or 8GB recommended, also tested model 4B but not documented here)
+- MicroSD card (16GB minimum, industrial grade recommended)
+- USB speakerphone (Jabra Speak 410/510 tested - high quality speakerphone is a MUST)
 - Computer with SD card reader
 - [Raspberry Pi Imager Software (free)](https://www.raspberrypi.com/software/)
 
@@ -513,7 +513,7 @@ This guide covers setting up Chatty Friend as a headless smart speaker on a Rasp
 a. Download and install [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
 b. Insert your SD card into your computer
 c. Open Raspberry Pi Imager and select:
-   - **Device**: your device type (raspberry pi 4 and 5 tested)
+   - **Device**: your device type (raspberry pi 5 in my case, 4B also tested but not documented here)
    - **OS**: Other general purpose OS → Ubuntu → Ubuntu Desktop 25.04 (64-bit)
    - **Storage**: Your SD card
 d. Click "Write" and wait for completion

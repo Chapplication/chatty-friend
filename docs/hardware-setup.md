@@ -5,14 +5,14 @@ This guide provides detailed instructions for setting up the hardware components
 ## Required Hardware
 
 ### Raspberry Pi Setup
-- **Raspberry Pi 4 Model B** (4GB or 8GB RAM recommended)
+- **Raspberry Pi 5** (4GB or 8GB RAM recommended)
   - 4GB minimum for stable operation
   - 8GB recommended for better performance
-- **MicroSD Card** (32GB minimum, Class 10 or better)
+- **MicroSD Card** (16GB minimum, industrial grade recommended)
   - 64GB recommended for logs and audio caching
-  - Use reputable brands (SanDisk, Samsung)
+  - Use reputable brands and lookout for counterfeit cards (SanDisk, Samsung)
 - **Power Supply**
-  - Official Raspberry Pi USB-C Power Supply (5V, 3A)
+  - Official Raspberry Pi USB-C Power Supply with 10 Watts to spare for the speakerphone (45 watt total tested)
   - Avoid underpowered supplies - causes audio issues
 - **Case with Cooling** (recommended)
   - Passive cooling minimum
