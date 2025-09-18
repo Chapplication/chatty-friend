@@ -538,9 +538,11 @@ else:  # we have wifi and authentication!
             config_updates = {}
             
             if section_id == 'basic':
+                time_zone = st.session_state.get('time_zone', '')
                 config_updates.update({
                     'USER_NAME': st.session_state.get('user_name', 'User'),
-                    'TIME_ZONE': st.session_state.get('time_zone', '') or None,
+                    'LANGUAGE': st.session_state.get('user_language', 'English'),
+                    'TIME_ZONE': time_zone,
                     'WAKE_WORD_MODEL': st.session_state.get('profile_wake_word', st.session_state.config_manager.default_config['WAKE_WORD_MODEL']),
                     'SPEED': st.session_state.get('profile_speed', st.session_state.config_manager.default_config['SPEED']),
                     'VOLUME': st.session_state.get('profile_volume', st.session_state.config_manager.default_config['VOLUME']),
@@ -549,6 +551,13 @@ else:  # we have wifi and authentication!
                     'ASSISTANT_EAGERNESS_TO_REPLY': st.session_state.get('eagerness', st.session_state.config_manager.default_config['ASSISTANT_EAGERNESS_TO_REPLY']),
                     'AUTO_GO_TO_SLEEP_TIME_SECONDS': st.session_state.get('sleep_time', st.session_state.config_manager.default_config['AUTO_GO_TO_SLEEP_TIME_SECONDS'])
                 })
+
+                if time_zone: 
+                    try:
+                        os.system(f"sudo timedatectl set-timezone {time_zone}")
+                    except Exception as e:
+                        st.error(f"❌ Failed to set timezone: {str(e)}")
+
             elif section_id == 'user_profile':
                 config_updates.update({
                     'USER_PROFILE': st.session_state.get('modal_user_profile', [])
@@ -662,7 +671,7 @@ else:  # we have wifi and authentication!
                     # Cancel any changes by clearing relevant session state keys
                     old_section = st.session_state.current_section
                     section_keys = {
-                        'basic': ['user_name', 'time_zone', 'profile_wake_word', 'profile_speed', 'profile_volume', 
+                        'basic': ['user_name', 'user_language', 'time_zone', 'profile_wake_word', 'profile_speed', 'profile_volume', 
                                  'max_profile_entries', 'seconds_to_wait', 'eagerness', 'sleep_time', 'initial_basic_values'],
                         'user_profile': ['modal_user_profile', 'original_user_profile', 'new_profile_entry'],
                         'notes': ['modal_notes', 'new_note_entry'],
@@ -713,7 +722,7 @@ else:  # we have wifi and authentication!
                 
                 # Define keys to clear for each section
                 section_keys = {
-                    'basic': ['user_name', 'time_zone', 'profile_wake_word', 'profile_speed', 'profile_volume', 
+                    'basic': ['user_name', 'user_language', 'time_zone', 'profile_wake_word', 'profile_speed', 'profile_volume', 
                              'max_profile_entries', 'seconds_to_wait', 'eagerness', 'sleep_time', 'initial_basic_values'],
                     'user_profile': ['modal_user_profile', 'original_user_profile', 'new_profile_entry'],
                     'notes': ['modal_notes', 'new_note_entry'],
@@ -785,6 +794,7 @@ else:  # we have wifi and authentication!
         if 'initial_basic_values' not in st.session_state:
             st.session_state.initial_basic_values = {
                 'user_name': st.session_state.config_manager.get_config('USER_NAME') or "User",
+                'user_language': st.session_state.config_manager.get_config('LANGUAGE') or "English",
                 'time_zone': st.session_state.config_manager.get_config('TIME_ZONE') or '',
                 'wake_word': st.session_state.config_manager.get_config('WAKE_WORD_MODEL') or 'amanda',
                 'speed': st.session_state.config_manager.get_percent_config_as_0_to_100_int('SPEED') or 60,
@@ -802,6 +812,12 @@ else:  # we have wifi and authentication!
             "Name",
             value=initial_values['user_name'],
             key="user_name",
+            on_change=lambda: lock_section() if not st.session_state.section_locked else None
+        )
+        user_language = st.text_input(
+            "Language",
+            value=initial_values['user_language'],
+            key="user_language",
             on_change=lambda: lock_section() if not st.session_state.section_locked else None
         )
         

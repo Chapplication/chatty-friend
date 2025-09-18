@@ -7,20 +7,23 @@ from chatty_dsp import b64
 from chatty_tools import dispatch_tool_call
 import time
 import asyncio
-
+import jinja2
+import pprint
 #
 #  OUTGOING MESSAGES TO ASSISTANT
 #
 async def send_to_assistant(ws, message):
 
-    if ws:
 
+    if ws:
         try:
             await ws.send(json.dumps(message))
             return True
         except Exception as e:
             print(f"Error sending websocket message: {e}")
             print(f"Message: {str(message)[:100]}...")
+    else:
+        print("❌ No websocket to send message")
 
     return False
 
@@ -43,7 +46,7 @@ def get_speed_from_percentage_int_0_to_100(speed):
 async def setup_assistant_session(master_state, greet_user: str = None):
 
     url = master_state.conman.get_config("WS_URL") + master_state.conman.get_config("REALTIME_MODEL")
-    headers = {"Authorization": f"Bearer {master_state.openai.api_key}"}#, "OpenAI-Beta": "realtime=v1"}
+    headers = {"Authorization": f"Bearer {master_state.openai.api_key}"}
 
     ws = None
     for retries in range(10):
@@ -87,6 +90,9 @@ async def setup_assistant_session(master_state, greet_user: str = None):
         if not sp:
             sp = master_state.conman.default_config["VOICE_ASSISTANT_SYSTEM_PROMPT"]
 
+        if sp:
+            sp = jinja2.Template(sp).render(**master_state.conman.config)
+
         user_profile = master_state.conman.get_config("USER_PROFILE")
         if user_profile:
             sp += "\n\nHere are some things that they user has told you in the past.  Use them to make the conversation more interesting and personal.\n"
@@ -100,6 +106,10 @@ async def setup_assistant_session(master_state, greet_user: str = None):
         user_name_for_assistant = master_state.conman.get_config("WAKE_WORD_MODEL")
         if user_name_for_assistant:
             sp += "\n\nYou are named " + user_name_for_assistant + ".  The user will call you this name and you can tell the user that is your name too.\n"
+
+        sp += "\n\nRespond in " + master_state.conman.get_config("LANGUAGE") + ".\n"
+        if greet_user:
+            greet_user = sp+"\n\n"+greet_user
 
         # milliseconds before remote decides to start responding... 200 is super eager, 800 is not so eager
         etr_percent = master_state.conman.get_percent_config_as_0_to_100_int("ASSISTANT_EAGERNESS_TO_REPLY")

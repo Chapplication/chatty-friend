@@ -17,8 +17,8 @@ from typing import Any
 import asyncio
 import time
 import os
-WAKE_UP_INSTRUCTIONS = "The user has just asked you to come online.  Provide a brief greeting please."
-SUMMARY_INSTRUCTIONS = "You were talking to the user and then you went offline.  You are now back online.  Let them know you're back."
+WAKE_UP_INSTRUCTIONS = "You are starting a new conversation."
+SUMMARY_INSTRUCTIONS = "You were talking to the user a few minutes ago."
 
 async def grand_central_dispatch(master_state) -> list[tuple[str, Any]]:
     """ main loop for the assistant.  listen for events from the remote AI and the mic/speaker/assistant managers
