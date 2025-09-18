@@ -7,7 +7,7 @@ A smart speaker companion for senior citizens, powered by AI and running on Rasp
 
 ## Demo
 
-**[▶️ Click for Demo](https://youtu.be/KJMjCZYRz5s?si=1WS6eXdjLY9bFooA)**
+**[▶️ Click for Demo](https://youtu.be/MQCsbIentdA)**
 
 ## Overview
 
