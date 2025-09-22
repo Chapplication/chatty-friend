@@ -15,6 +15,7 @@ SUPERVISOR_SYSTEM_PROMPT = """
 ## Your task is to examine the transcript of a conversation and produce specific extracts as XML tags.
 The conversation is between a human user and an automated companion.  The conversation took place audibly and was transcribed for you.
 The purpose of the extracts is to enable the companion to provide deeper and more helpful responses to the user in future conversations, and to follow-up on any specific needs that were raised.
+The conversation ends when the user instructs the companion to go to sleep.  It is normal for the user to ask the companion to go to sleep so there is no need to report on that.
 
 The instructions for the companion including the user's profile content at the start of the conversation are provided here.
 <companion_instructions>
@@ -307,8 +308,9 @@ async def report_conversation_to_supervisor(master_state):
     if not master_state.transcript_history or not master_state.conman.get_config("SUPERVISOR_MODEL") or not master_state.secrets_manager.get_secret("chat_api_key"):
         return None
 
-    # if there's only one turn, its the initial AI greeting and we don't need to report - happens on false positives from the wake word
-    if len(master_state.transcript_history) == 1:
+    # don't summarize if the user never spoke
+    user_message_count = sum(1 for item in master_state.transcript_history if item["role"] == "user")
+    if user_message_count == 0:
         return None
 
     # make sure we have the latest config
