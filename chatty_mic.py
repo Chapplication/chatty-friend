@@ -47,6 +47,10 @@ class WakeWordDetector:
         # default to active if no model
         self.last_wake_word_detected = None
 
+    def calculate_signal_strength(self, audio_samples: np.ndarray) -> float:
+        """Calculate RMS (Root Mean Square) amplitude of audio signal."""
+        return np.sqrt(np.mean(audio_samples.astype(np.float64) ** 2))
+
     def on_audio_buffer_in(self, audio_16ints: np.ndarray, vad_only: bool = False) -> tuple[bool, bool]:
         """
         Process audio and return (is_voice, is_wake_word).  
@@ -66,10 +70,33 @@ class WakeWordDetector:
             for _, score in self.model.predict(audio_16ints).items():
                 if score > self.master_state.conman.get_config("WAKE_WORD_THRESHOLD"):
                     print(f"🎯 Wake word detected: {score:.2f}")
-                    if self.last_wake_word_detected is None or (time.time() - self.last_wake_word_detected) > self.wake_to_wake_min_time:
-                        self.last_wake_word_detected = time.time()
-                        is_wake_word = True
-                        self.model.reset()
+                    
+                    # Get the raw audio buffer that led to this detection
+                    try:
+                        raw_audio_history = np.array(list(self.model.preprocessor.raw_data_buffer)).astype(np.int16)
+                        
+                        # Calculate RMS over the last 12000 samples (~0.75 seconds at 16kHz)
+                        wake_word_audio = raw_audio_history[-12000:]
+                        rms_strength = self.calculate_signal_strength(wake_word_audio)
+                        
+                        # fairly quiet - want to avoid noise trigger but still be sensitive
+                        min_strength = 800.0
+                        
+                        if rms_strength >= min_strength:
+                            print(f"✅ Wake word accepted: signal strength {rms_strength:.0f}")
+                            if self.last_wake_word_detected is None or (time.time() - self.last_wake_word_detected) > self.wake_to_wake_min_time:
+                                self.last_wake_word_detected = time.time()
+                                is_wake_word = True
+                                self.model.reset()
+                        else:
+                            print(f"🔇 Wake word rejected: insufficient signal strength {rms_strength:.0f} < {min_strength}")
+                            
+                    except Exception as e:
+                        print(f"⚠️ Error checking signal strength, allowing wake word: {e}")
+                        if self.last_wake_word_detected is None or (time.time() - self.last_wake_word_detected) > self.wake_to_wake_min_time:
+                            self.last_wake_word_detected = time.time()
+                            is_wake_word = True
+                            self.model.reset()
         
         return (is_voice, is_wake_word)
 

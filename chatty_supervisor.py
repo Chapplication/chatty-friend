@@ -307,6 +307,10 @@ async def report_conversation_to_supervisor(master_state):
     if not master_state.transcript_history or not master_state.conman.get_config("SUPERVISOR_MODEL") or not master_state.secrets_manager.get_secret("chat_api_key"):
         return None
 
+    # if there's only one turn, its the initial AI greeting and we don't need to report - happens on false positives from the wake word
+    if len(master_state.transcript_history) == 1:
+        return None
+
     # make sure we have the latest config
     master_state.conman.load_config()
     supervisor_contact = master_state.conman.get_contact_by_type(CONTACT_TYPE_PRIMARY_SUPERVISOR)
