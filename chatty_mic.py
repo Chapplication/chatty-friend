@@ -70,6 +70,7 @@ class WakeWordDetector:
             for _, score in self.model.predict(audio_16ints).items():
                 if score > self.master_state.conman.get_config("WAKE_WORD_THRESHOLD"):
                     print(f"🎯 Wake word detected: {score:.2f}")
+                    self.master_state.add_log_for_next_summary(f"🎯 Wake word detected: {score:.2f}")
                     
                     # Get the raw audio buffer that led to this detection
                     try:
@@ -83,8 +84,10 @@ class WakeWordDetector:
                         min_strength = 800.0
                         
                         if rms_strength >= min_strength:
-                            print(f"✅ Wake word accepted: signal strength {rms_strength:.0f}")
+                            print(f"✅ Wake word signal strength {rms_strength:.0f}")
+                            self.master_state.add_log_for_next_summary(f"✅ Wake word signal strength {rms_strength:.0f}")
                             if self.last_wake_word_detected is None or (time.time() - self.last_wake_word_detected) > self.wake_to_wake_min_time:
+                                print(f"✅ Wake word accepted")
                                 self.last_wake_word_detected = time.time()
                                 is_wake_word = True
                                 self.model.reset()

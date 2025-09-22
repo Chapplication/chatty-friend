@@ -40,6 +40,8 @@ class ChattyMasterState:
         self.tool_dispatch_map = {}
         self.tools_for_assistant = []
 
+        self.logs_for_next_summary = []
+
         self.should_quit = False
         self.should_upgrade = False
         self.should_reset_session = False
@@ -51,7 +53,7 @@ class ChattyMasterState:
 
         openai_api_key = self.secrets_manager.get_secret("chat_api_key")
         if not openai_api_key:
-            
+
             raise Exception("No OpenAI API key found")
 
         self.openai = OpenAI(api_key=openai_api_key)
@@ -65,6 +67,14 @@ class ChattyMasterState:
         self._initialized = True
 
         self.semantic_matcher = ChattyEmbed(self, EMBEDDED_PHRASES)
+
+    def add_log_for_next_summary(self, log):
+        self.logs_for_next_summary.append(log)
+
+    def get_logs_for_next_summary(self):
+        logs = self.logs_for_next_summary
+        self.logs_for_next_summary = []
+        return logs
 
     async def start_tasks(self, task_managers):
         await self.reset_session_state_variables()
@@ -117,6 +127,7 @@ class ChattyMasterState:
 
         self.transcript_history = []
         self.usage_history = []
+        self.logs_for_next_summary = []
         self.remote_assistant_state = {}
         self.ws = None
         self.last_activity_time = None

@@ -298,6 +298,13 @@ def format_summary_email(master_state, responses):
         plain_text += f"{speaker}: {item['content']}\n"
 
     plain_text += f"\nSETUP: {master_state.transcript_history[0]['content']}\n"
+
+    if master_state.logs_for_next_summary:
+        plain_text += "\n\n---------LOGS:\n"
+        for log in master_state.logs_for_next_summary:
+            plain_text += str(log) + "\n"
+        plain_text += "\n\n---------LOGS END\n"
+
     plain_text += f"\nTOTAL COST: ${total_cost:.2f}"
 
 
@@ -310,7 +317,7 @@ async def report_conversation_to_supervisor(master_state):
 
     # don't summarize if the user never spoke
     user_message_count = sum(1 for item in master_state.transcript_history if item["role"] == "user")
-    if user_message_count == 0:
+    if not user_message_count and not master_state.logs_for_next_summary:
         return None
 
     # make sure we have the latest config
