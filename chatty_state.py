@@ -70,7 +70,8 @@ class ChattyMasterState:
 
     def add_log_for_next_summary(self, log):
         self.logs_for_next_summary.append(log)
-
+        if len(self.logs_for_next_summary) > 100:
+            self.logs_for_next_summary = self.logs_for_next_summary[-100:]
     def get_logs_for_next_summary(self):
         logs = self.logs_for_next_summary
         self.logs_for_next_summary = []

@@ -5,6 +5,8 @@ import json
 import websockets
 from chatty_dsp import b64
 from chatty_tools import dispatch_tool_call
+from chatty_config import NATIVE_OAI_SAMPLE_RATE_HZ, MAX_OUTPUT_TOKENS
+
 import time
 import asyncio
 import jinja2
@@ -124,7 +126,7 @@ async def setup_assistant_session(master_state, greet_user: str = None):
                     "input": {
                         "format": {          
                             "type": "audio/pcm",
-                            "rate": 24000
+                            "rate": NATIVE_OAI_SAMPLE_RATE_HZ
                         },
                         "noise_reduction": {"type":"far_field"},
                         "transcription": {
@@ -143,14 +145,14 @@ async def setup_assistant_session(master_state, greet_user: str = None):
                     "output": {
                         "format": {
                             "type": "audio/pcm",
-                            "rate": 24000
+                            "rate": NATIVE_OAI_SAMPLE_RATE_HZ
                         },
                         "speed":get_speed_from_percentage_int_0_to_100(master_state.conman.get_config("SPEED")),
                         "voice": master_state.conman.get_config("VOICE"),
                     }
                 },
                 "instructions": sp,
-                "max_output_tokens": 1024,
+                "max_output_tokens": MAX_OUTPUT_TOKENS,
                 "output_modalities": ["audio"],
                 # "temperature": 0.8,Failing as of sept 1 2025
                 "tool_choice": "auto",
@@ -180,13 +182,13 @@ async def send_assistant_instructions(master_state, greet_user):
             "response": {
                 "conversation":"auto",
                 "instructions": greet_user,
-                "max_output_tokens": 128,
+                "max_output_tokens": MAX_OUTPUT_TOKENS,
                 "output_modalities": ["audio"],
                 "audio": {
                     "output": {
                         "format": {
                             "type": "audio/pcm",
-                            "rate": 24000
+                            "rate": NATIVE_OAI_SAMPLE_RATE_HZ
                         },
                         "voice": master_state.conman.get_config("VOICE"),
                     }

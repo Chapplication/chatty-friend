@@ -1,5 +1,6 @@
 import base64
 import numpy as np
+from chatty_config import NATIVE_OAI_SAMPLE_RATE_HZ
 
 # Helper function to encode audio chunks in base64
 b64 = lambda blob: base64.b64encode(blob).decode()
@@ -17,7 +18,7 @@ def chatty_tone(freq_duration_pairs, volume=0.5):
    Returns:
        audio data (16-bit mono, 24000 Hz)
    """
-   sample_rate = 24000
+   sample_rate = NATIVE_OAI_SAMPLE_RATE_HZ
    audio_data = np.array([], dtype=np.int16)
    if volume > 1.0 or volume < 0.0:
         volume = 0.5

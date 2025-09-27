@@ -83,6 +83,8 @@ response_vars = [
 def format_summary_email(master_state, responses):
     # Format the email content
     subject = f"Chatty Summary for {get_current_date_string(with_time=True)}"
+    logs_to_include = master_state.get_logs_for_next_summary()
+
     if responses["escalation"]:
         subject += " - Escalation"
 
@@ -245,6 +247,21 @@ def format_summary_email(master_state, responses):
 
     html_content += "</div>"
 
+    # add logs section
+    if logs_to_include:
+        html_content += f"""
+            <h2>💬 Logs</h2>
+            <div class="section">
+                <p>The following logs were generated during the conversation:</p>
+        """
+        for log in logs_to_include:
+            html_content += f"""
+                <div class="log">
+                    <p>{log}</p>
+                </div>
+            """
+        html_content += "</div>"
+
     # Add setup section
     html_content += f"""
             <h2>⚙️ Initial Setup</h2>
@@ -299,11 +316,13 @@ def format_summary_email(master_state, responses):
 
     plain_text += f"\nSETUP: {master_state.transcript_history[0]['content']}\n"
 
-    if master_state.logs_for_next_summary:
+    if logs_to_include:
         plain_text += "\n\n---------LOGS:\n"
-        for log in master_state.logs_for_next_summary:
+        for log in logs_to_include:
             plain_text += str(log) + "\n"
         plain_text += "\n\n---------LOGS END\n"
+    else:
+        print("NOLOGS")
 
     plain_text += f"\nTOTAL COST: ${total_cost:.2f}"
 

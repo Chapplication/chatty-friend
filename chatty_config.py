@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 import time
 from datetime import datetime
 
-CHATTY_FRIEND_VERSION_NUMBER = "0.1.6"
+CHATTY_FRIEND_VERSION_NUMBER = "0.1.7"
 
 def get_current_date_string(with_time=False):
 	return datetime.now().strftime("%Y-%m-%d" + (" %H:%M:%S" if with_time else ""))
@@ -278,6 +278,9 @@ NUM_INCOMING_AUDIO_BUFFERS = int(SECONDS_OF_AUDIO_TO_BUFFER*1000 / CHUNK_DURATIO
 # VAD / wake word require 16khz but openai streams natively at 24khz
 SAMPLE_RATE_HZ    = 16_000
 NATIVE_OAI_SAMPLE_RATE_HZ = 24_000
+
+# max output for audio tokens
+MAX_OUTPUT_TOKENS = 4096
 
 AUDIO_BLOCKSIZE   = int(SAMPLE_RATE_HZ * CHUNK_DURATION_MS / 1000)
 
