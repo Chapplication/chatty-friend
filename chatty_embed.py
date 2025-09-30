@@ -14,10 +14,10 @@ class ChattyEmbed(object):
 
         self.vocabs = {}
         self.error = None
+        saved_vocabs = {}
 
         # try to load the embeddings from cache
         try:
-            saved_vocabs = {}
 
             with open(VECTOR_CACHE_PATH, 'rb') as index_file:
                 saved_vocabs = pickle.load(index_file)

@@ -10,7 +10,7 @@ class GoogleSearch(LLMTool):
                          [query, num_results], 
                          master_state)
         self.api_key = master_state.secrets_manager.get_secret('google_search_api_key')
-        self.base_url = f"https://www.googleapis.com/customsearch/v1?key={self.api_key}&cx=c6a0b091a8502493d&q="
+        self.base_url = f"https://www.googleapis.com/customsearch/v1?key={self.api_key}&num=<NUM_RESULTS>&cx=c6a0b091a8502493d&q="
         self.request_timeout = 10  # seconds
         self.max_retries = 2
 
@@ -46,7 +46,7 @@ class GoogleSearch(LLMTool):
                     'Upgrade-Insecure-Requests': '1'
                 }
 
-            url = self.base_url + '+'.join(query.split())
+            url = self.base_url.replace("<NUM_RESULTS>", str(count)) + '+'.join(query.split())
             r = requests.Session().get(url, headers=headers_Get)  
             result_text = None
             def extract_search_text_simple(r):

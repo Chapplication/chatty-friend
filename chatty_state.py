@@ -157,8 +157,8 @@ class ChattyMasterState:
 
     async def check_auto_summarize_time(self):
         if self.remote_assistant_state:
-            if "socket_open_time" in self.remote_assistant_state:
-                if time.time() - self.remote_assistant_state["socket_open_time"] > OPENAI_SESSION_HARD_LIMIT_SECONDS-60:
+            if "session_open_time" in self.remote_assistant_state:
+                if time.time() - self.remote_assistant_state["session_open_time"] > OPENAI_SESSION_HARD_LIMIT_SECONDS-60:
                     self.do_auto_summarize()
 
     async def do_auto_summarize(self):

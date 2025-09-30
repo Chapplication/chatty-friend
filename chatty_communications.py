@@ -22,7 +22,7 @@ async def chatty_send_email(master_state, recipient, subject, content, html_cont
                 msg = MIMEText(content.encode('utf-8'), _charset='utf-8')
                 msg['Subject'] = subject.encode('utf-8').decode('ascii','ignore')
                 msg['From'] = username
-                msg['To'] = master_state.secrets_manager.get_secret('email_recipient')
+                msg['To'] = recipient
 
                 #Connect to SMTP Server
                 session = smtplib.SMTP(smtp_server, smtp_port)
@@ -41,7 +41,7 @@ async def chatty_send_email(master_state, recipient, subject, content, html_cont
                 msg = MIMEMultipart('alternative')
                 msg['Subject'] = subject
                 msg['From'] = username
-                msg['To'] = master_state.secrets_manager.get_secret('email_recipient')
+                msg['To'] = recipient
 
                 # Attach both versions
                 part1 = MIMEText(content, 'plain', 'utf-8')

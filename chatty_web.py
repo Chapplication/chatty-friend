@@ -16,7 +16,7 @@ from tools.news_service import RSS_NEWS_FEEDS
 import pytz
 import subprocess
 
-from chatty_wifi import IS_PI, IS_MAC, is_online
+from chatty_wifi import IS_PI, IS_MAC, is_online, record_web_activity
 
 # DO NOT COMMIT THIS True!!!
 TESTING_PI_UI_MOCK_SYSTEM_CALLS = False
@@ -40,6 +40,8 @@ if IS_PI and st.session_state.authentication_time:
         st.session_state.authentication_time = None
     else:
         st.session_state.authentication_time = time.time()
+
+record_web_activity()
 
 def speak_text(text):
     """Use espeak to speak text on Pi"""

@@ -12,6 +12,7 @@ from chatty_wifi import is_online, what_is_my_ip
 from chatty_config import USER_SAID_WAKE_WORD, USER_STARTED_SPEAKING, ASSISTANT_STOP_SPEAKING, MASTER_EXIT_EVENT, ASSISTANT_RESUME_AFTER_AUTO_SUMMARY
 from chatty_config import SPEAKER_PLAY_TONE, CHATTY_SONG_STARTUP, CHATTY_SONG_AWAKE
 from chatty_config import NORMAL_EXIT, UPGRADE_EXIT
+import websockets
 
 from typing import Any
 import asyncio

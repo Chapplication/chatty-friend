@@ -97,7 +97,7 @@ async def setup_assistant_session(master_state, greet_user: str = None):
 
         user_profile = master_state.conman.get_config("USER_PROFILE")
         if user_profile:
-            sp += "\n\nHere are some things that they user has told you in the past.  Use them to make the conversation more interesting and personal.\n"
+            sp += "\n\nHere are some FACTS that the user has told you in the past.  These are not examples, they are actual useful facts about the user.  Use them to make the conversation more interesting and personal.\n"
             sp += "\n".join(user_profile)
 
         resume_context = master_state.conman.get_resume_context()

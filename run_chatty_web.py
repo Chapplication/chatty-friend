@@ -13,7 +13,7 @@ try:
         conman = ConfigManager()
         ssid = conman.get_config('WIFI_SSID')
         password = conman.get_config('WIFI_PASSWORD')
-        if ssid and password:
+        if ssid:
             connect_to_wifi(ssid, password)
             time.sleep(10)
         if not is_online():
@@ -21,5 +21,5 @@ try:
 except Exception as e:
     print(e)
 
-sys.argv = ["streamlit", "run", filename, "--server.port=80","--server.headless=true"]; 
+sys.argv = ["streamlit", "run", filename, "--server.port=80","--server.headless=true"]
 runpy.run_module("streamlit", run_name="__main__")

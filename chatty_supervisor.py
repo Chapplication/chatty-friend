@@ -451,6 +451,7 @@ async def report_conversation_to_supervisor(master_state):
         import traceback
         traceback.print_exc()
         print(f"Error reporting conversation to supervisor: {e}")
-        for supervisor in supervisor_contact:
-            if supervisor and supervisor.get("email"):
-                await chatty_send_email(master_state, supervisor["email"], "Chatty Friend "+get_current_date_string()+" unable to summarize and escalate", "Please review configuration and try again.  Error: "+str(e))
+        if supervisor_contact:
+            for supervisor in supervisor_contact:
+                if supervisor and supervisor.get("email"):
+                    await chatty_send_email(master_state, supervisor["email"], "Chatty Friend "+get_current_date_string()+" unable to summarize and escalate", "Please review configuration and try again.  Error: "+str(e))
