@@ -102,8 +102,10 @@ async def setup_assistant_session(master_state, greet_user: str = None):
 
         resume_context = master_state.conman.get_resume_context()
         if resume_context:
-            sp += "\n\nYou were just talking with the user and here is some context you need to use to continue the conversation:\n"
+            sp += "\n\n--- resuming context of prior conversation ---\n"
+            sp += "\n\nYou were just talking with the user and here is some context you need to use to continue the conversation.  This is just background about where you left off, don't call any tools or functions to take any actions based on this because that work was already done:\n"
             sp += resume_context
+            sp += "\n--- end of resuming context of prior conversation ---\n"
 
         user_name_for_assistant = master_state.conman.get_config("WAKE_WORD_MODEL")
         if user_name_for_assistant:
