@@ -81,7 +81,7 @@ class WakeWordDetector:
                         rms_strength = self.calculate_signal_strength(wake_word_audio)
                         
                         # fairly quiet - want to avoid noise trigger but still be sensitive
-                        min_strength = 800.0
+                        min_strength = 1100.0
                         
                         if rms_strength >= min_strength:
                             print(f"✅ Wake word signal strength {rms_strength:.0f}")

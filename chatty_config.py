@@ -233,7 +233,7 @@ default_config = {
     "WAKE_WORD_MODEL" : "amanda",
     "WAKE_WORD_MODEL_CHOICES" : ["amanda", "oliver"],
     "VAD_THRESHOLD" : 0.3,
-    "WAKE_WORD_THRESHOLD" : 0.5,
+    "WAKE_WORD_THRESHOLD" : 0.55,
     "SECONDS_TO_WAIT_FOR_MORE_VOICE" : 1.0,
     "CONFIG_PASSWORD" : "assistant",
     "CONFIG_PASSWORD_HINT": "assistant",
