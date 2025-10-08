@@ -17,7 +17,8 @@ def get_current_date_string(with_time=False):
 OPENAI_SESSION_HARD_LIMIT_SECONDS = 30*60
 
 voice_choices = {
-    "gpt-realtime":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar']
+    "gpt-realtime":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar'],
+    "gpt-realtime-mini":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar']
 }
 
 # https://platform.openai.com/docs/pricing#audio-tokens Aug 28 2025
@@ -29,6 +30,14 @@ cost_sheet_per_million = {
         "per_input_audio_token_cached": 32.0,
         "per_output_text_token": 16,
         "per_output_audio_token": 64
+    },
+    "gpt-realtime-mini": {
+        "per_input_text_token": 0.6,
+        "per_input_text_token_cached": 0.06,
+        "per_input_audio_token": 10.0,
+        "per_input_audio_token_cached": 0.3,
+        "per_output_text_token": 2.4,
+        "per_output_audio_token": 20.0
     }
 }
 
@@ -219,7 +228,7 @@ important information about the user's living situation, mood, etc.
 
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {
-    "REALTIME_MODEL" : "gpt-realtime",
+    "REALTIME_MODEL" : "gpt-realtime-mini",
     "AUDIO_TRANSCRIPTION_MODEL" : "gpt-4o-mini-transcribe",
     "EMBEDDING_MODEL" : "text-embedding-3-small",
     "SUPERVISOR_MODEL" : "gpt-5-mini",

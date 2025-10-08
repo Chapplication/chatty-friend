@@ -16,7 +16,7 @@ Chatty Friend is an AI-powered voice assistant specifically designed to provide 
 Special care was given to the configuration of speech parameters (how fast the user talks, easy interruptability) and privacy (local voice activity detection and local hotword 'wake up') as well as supervisory needs.  The supervisor runs a reasoning model on conversation transripts to determine the need for immediate escalations or notes for future interactions.
 
 **AI Models**
-The default AI model to use for realtime interactions (from chatty_config.py) is gpt-realtime
+The default AI model to use for realtime interactions (from chatty_config.py) is gpt-realtime-mini
 
 **Key Features:**
 - 🍓 Simple smartspeaker deployment to senior citizen living evironment on Raspberry Pi (no phone/mac/tablet/laptop needed)
