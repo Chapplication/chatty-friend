@@ -18,21 +18,50 @@ except ImportError:
 #  MIC input handling ---------
 #
 
+import time
+from collections import deque
+import numpy as np
+
 class WakeWordDetector:
-    """  Wraps openwakeword model for wake word detection.  """
+    """Wraps openwakeword model for wake word detection."""
     def __init__(self, master_state):
         self.model = None
         self.wake_to_wake_min_time = 5.0
         self.master_state = master_state
+
+        # Audio characteristics: 80ms frames at 16kHz → 1280 samples per call
+        self.sample_rate = 16000
+        self.frame_duration_sec = 0.08
+        self.frame_samples = int(self.sample_rate * self.frame_duration_sec)  # 1280
+
+        # --- Temporal smoothing / history state
+        # 25 frames ≈ 25 * 80ms ≈ 2.0s of score history
+        self.score_history = deque(maxlen=25)
+        self.vad_history = deque(maxlen=25)
+
+        # trigger_level=4 → ≈ 320ms of sustained high scores
+        cfg_trigger_level = master_state.conman.get_config("WAKE_TRIGGER_LEVEL")
+        self.trigger_level = cfg_trigger_level if cfg_trigger_level is not None else 4
+
+        # vad_trigger_lookback=10 → ≈ 800ms of "recent voice" required
+        cfg_vad_lookback = master_state.conman.get_config("VAD_TRIGGER_LOOKBACK")
+        self.vad_trigger_lookback = cfg_vad_lookback if cfg_vad_lookback is not None else 10
+
+        # RMS window: ~0.75s of audio for energy check
+        self.rms_window_samples = int(0.75 * self.sample_rate)  # 12000
 
         base_assistant_name = master_state.conman.get_wake_word_model()
         if OpenWakewordModel and base_assistant_name:
             oww = None
             for extension in ["tflite", "onnx"]:
                 try:
-                    wake_word_file = "./"+base_assistant_name +"."+ extension
-                    print("Trying to load OpenWakeWord model: "+wake_word_file)
-                    oww = OpenWakewordModel(wakeword_models=[wake_word_file], vad_threshold=master_state.conman.get_config("VAD_THRESHOLD"),inference_framework=extension)
+                    wake_word_file = "./" + base_assistant_name + "." + extension
+                    print("Trying to load OpenWakeWord model: " + wake_word_file)
+                    oww = OpenWakewordModel(
+                        wakeword_models=[wake_word_file],
+                        vad_threshold=master_state.conman.get_config("VAD_THRESHOLD"),
+                        inference_framework=extension,
+                    )
                     break
                 except Exception as e:
                     print(f"OpenWakeWord exception: {e}")
@@ -41,67 +70,132 @@ class WakeWordDetector:
                 print("✅ OpenWakeWord model loaded")
                 self.model = oww
             else:
-                print(f"❌ Failed to load OpenWakeWord model")
+                print("❌ Failed to load OpenWakeWord model")
                 self.model = None
 
-        # default to active if no model
         self.last_wake_word_detected = None
 
     def calculate_signal_strength(self, audio_samples: np.ndarray) -> float:
         """Calculate RMS (Root Mean Square) amplitude of audio signal."""
         return np.sqrt(np.mean(audio_samples.astype(np.float64) ** 2))
 
-    def on_audio_buffer_in(self, audio_16ints: np.ndarray, vad_only: bool = False) -> tuple[bool, bool]:
+    def on_audio_buffer_in(
+        self,
+        audio_16ints: np.ndarray,
+        vad_only: bool = False
+    ) -> tuple[bool, bool]:
         """
-        Process audio and return (is_voice, is_wake_word).  
-        don't optimize out the call to model.predict if not voice... 
-        it appears to be a stateful call that accumulates audio.
+        Process audio and return (is_voice, is_wake_word).
+
+        - Always feeds the model (stateful streaming).
+        - Uses VAD gating + temporal smoothing to reduce false positives.
         """
 
-        # feed the VAD model first....
+        # If we have no model, just estimate voice and never fire wake word
+        if self.model is None:
+            rms = self.calculate_signal_strength(audio_16ints)
+            is_voice = rms > 500.0  # simple fallback heuristic
+            return (is_voice, False)
+
+        # --- VAD first (we keep history to use for gating)
         vad_score = self.model.vad.predict(audio_16ints)
-        is_voice = vad_score > self.master_state.conman.get_config("VAD_THRESHOLD")
+        vad_threshold = self.master_state.conman.get_config("VAD_THRESHOLD")
+        is_voice = vad_score > vad_threshold
+
+        self.vad_history.append(is_voice)
+
+        # Always feed the wake word model to maintain its internal state
+        scores_dict = self.model.predict(audio_16ints)
+
+        if vad_only:
+            return (is_voice, False)
+
+        # --- Temporal smoothing of wake-word scores
+
+        # For multiple wakewords, you can swap this to something else (e.g., per-key)
+        max_score = max(scores_dict.values()) if scores_dict else 0.0
+        self.score_history.append(max_score)
+
+        wake_threshold = self.master_state.conman.get_config("WAKE_WORD_THRESHOLD")
+
+        # Require `trigger_level` consecutive frames above threshold
+        recent_scores = list(self.score_history)[-self.trigger_level:]
+        has_sustained_high_scores = (
+            len(recent_scores) == self.trigger_level
+            and all(s >= wake_threshold for s in recent_scores)
+        )
+
+        # --- VAD gating for acceptance
+
+        if self.vad_trigger_lookback > 0:
+            recent_vad = list(self.vad_history)[-self.vad_trigger_lookback:]
+            has_recent_voice = any(recent_vad) if recent_vad else is_voice
+        else:
+            has_recent_voice = is_voice
+
+        wake_candidate = has_sustained_high_scores and has_recent_voice
 
         is_wake_word = False
 
-        if not vad_only:
+        if wake_candidate:
+            # RMS-energy filter + debounce + safe error handling
+            try:
+                raw_audio_history = np.array(
+                    list(self.model.preprocessor.raw_data_buffer)
+                ).astype(np.int16)
 
-            # now feed the wake word model
-            for _, score in self.model.predict(audio_16ints).items():
-                if score > self.master_state.conman.get_config("WAKE_WORD_THRESHOLD"):
-                    print(f"🎯 Wake word detected: {score:.2f}")
-                    self.master_state.add_log_for_next_summary(f"🎯 Wake word detected: {score:.2f}")
-                    
-                    # Get the raw audio buffer that led to this detection
-                    try:
-                        raw_audio_history = np.array(list(self.model.preprocessor.raw_data_buffer)).astype(np.int16)
-                        
-                        # Calculate RMS over the last 12000 samples (~0.75 seconds at 16kHz)
-                        wake_word_audio = raw_audio_history[-12000:]
-                        rms_strength = self.calculate_signal_strength(wake_word_audio)
-                        
-                        # fairly quiet - want to avoid noise trigger but still be sensitive
-                        min_strength = 1100.0
-                        
-                        if rms_strength >= min_strength:
-                            print(f"✅ Wake word signal strength {rms_strength:.0f}")
-                            self.master_state.add_log_for_next_summary(f"✅ Wake word signal strength {rms_strength:.0f}")
-                            if self.last_wake_word_detected is None or (time.time() - self.last_wake_word_detected) > self.wake_to_wake_min_time:
-                                print(f"✅ Wake word accepted")
-                                self.last_wake_word_detected = time.time()
-                                is_wake_word = True
-                                self.model.reset()
-                        else:
-                            print(f"🔇 Wake word rejected: insufficient signal strength {rms_strength:.0f} < {min_strength}")
-                            
-                    except Exception as e:
-                        print(f"⚠️ Error checking signal strength, allowing wake word: {e}")
-                        if self.last_wake_word_detected is None or (time.time() - self.last_wake_word_detected) > self.wake_to_wake_min_time:
-                            self.last_wake_word_detected = time.time()
-                            is_wake_word = True
-                            self.model.reset()
-        
+                if raw_audio_history.size == 0:
+                    raise ValueError("raw_data_buffer is empty")
+
+                # Use last ~0.75s of audio or the full buffer if smaller
+                if raw_audio_history.shape[0] > self.rms_window_samples:
+                    wake_word_audio = raw_audio_history[-self.rms_window_samples:]
+                else:
+                    wake_word_audio = raw_audio_history
+
+                rms_strength = self.calculate_signal_strength(wake_word_audio)
+
+                min_strength = 1100.0  # still your heuristic; we can tune later
+
+                now = time.time()
+                debounce_ok = (
+                    self.last_wake_word_detected is None
+                    or (now - self.last_wake_word_detected) > self.wake_to_wake_min_time
+                )
+
+                if rms_strength >= min_strength and debounce_ok:
+                    print(
+                        f"🎯 Wake word detected (smoothed): "
+                        f"score={max_score:.2f}, RMS={rms_strength:.0f}"
+                    )
+                    self.master_state.add_log_for_next_summary(
+                        f"🎯 Wake word detected (smoothed): "
+                        f"score={max_score:.2f}, RMS={rms_strength:.0f}"
+                    )
+                    print("✅ Wake word accepted")
+                    self.last_wake_word_detected = now
+                    is_wake_word = True
+                    self.model.reset()
+                else:
+                    if not debounce_ok:
+                        print("⏱️ Wake word candidate rejected: within debounce window")
+                    else:
+                        print(
+                            f"🔇 Wake word rejected: insufficient signal strength "
+                            f"{rms_strength:.0f} < {min_strength}"
+                        )
+
+            except Exception as e:
+                msg = (
+                    f"⚠️ Error checking signal strength for wake word candidate: {e}. "
+                    "Wake word NOT accepted."
+                )
+                print(msg)
+                self.master_state.add_log_for_next_summary(msg)
+                # is_wake_word remains False
+
         return (is_voice, is_wake_word)
+
 
 async def mic_listener(manager: AsyncManager) -> None:
     """
