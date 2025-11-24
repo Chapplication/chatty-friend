@@ -150,7 +150,7 @@ async def assistant_go_live():
         await master_state.start_tasks(managers)
 
         if is_automated_restart_after_summary:
-            await setup_assistant_session(master_state, SUMMARY_INSTRUCTIONS)
+            await master_state.add_to_transcript("system", await setup_assistant_session(master_state, SUMMARY_INSTRUCTIONS))
             managers["mic"].command_q.put_nowait(ASSISTANT_RESUME_AFTER_AUTO_SUMMARY)
         elif just_rebooted:
             await managers["speaker"].command_q.put(SPEAKER_PLAY_TONE+":"+CHATTY_SONG_STARTUP)
@@ -184,6 +184,7 @@ async def assistant_go_live():
 
             except Exception as e:
                 print(f"❌ Error in assistant_go_live: {e}")
+                master_state.add_log_for_next_summary("X non-keyboard exceptiopn assistant go live "+str(e))
                 import traceback
                 traceback.print_exc()
 
@@ -229,6 +230,8 @@ async def assistant_go_live():
 
         except Exception as e:
             print("error in assistant_go_live inner loop cleanup")
+            master_state.add_log_for_next_summary("X exceptiopn inner loop "+str(e))
+
             import traceback
             traceback.print_exc()
 
@@ -236,6 +239,7 @@ async def assistant_go_live():
         master_state.pa.terminate()
     except Exception as e:
         print("error in assistant_go_live outer loop cleanup")
+        master_state.add_log_for_next_summary("X exceptiopn outer loop "+str(e))
         import traceback
         traceback.print_exc()
 

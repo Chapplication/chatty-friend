@@ -41,11 +41,11 @@ class WakeWordDetector:
 
         # trigger_level=4 → ≈ 320ms of sustained high scores
         cfg_trigger_level = master_state.conman.get_config("WAKE_TRIGGER_LEVEL")
-        self.trigger_level = cfg_trigger_level if cfg_trigger_level is not None else 4
+        self.trigger_level = cfg_trigger_level if cfg_trigger_level is not None else 3
 
         # vad_trigger_lookback=10 → ≈ 800ms of "recent voice" required
         cfg_vad_lookback = master_state.conman.get_config("VAD_TRIGGER_LOOKBACK")
-        self.vad_trigger_lookback = cfg_vad_lookback if cfg_vad_lookback is not None else 10
+        self.vad_trigger_lookback = cfg_vad_lookback if cfg_vad_lookback is not None else 7
 
         # RMS window: ~0.75s of audio for energy check
         self.rms_window_samples = int(0.75 * self.sample_rate)  # 12000
@@ -104,11 +104,11 @@ class WakeWordDetector:
 
         self.vad_history.append(is_voice)
 
-        # Always feed the wake word model to maintain its internal state
-        scores_dict = self.model.predict(audio_16ints)
-
+        # return now if we're just filtering for voice (vs. listening for wakeword)
         if vad_only:
             return (is_voice, False)
+
+        scores_dict = self.model.predict(audio_16ints)
 
         # --- Temporal smoothing of wake-word scores
 
@@ -177,6 +177,7 @@ class WakeWordDetector:
                     is_wake_word = True
                     self.model.reset()
                 else:
+                    self.master_state.add_log_for_next_summary(f"⏱️ Wake word candidate rejected: {rms_strength:.0f} < {min_strength}, {debounce_ok}")
                     if not debounce_ok:
                         print("⏱️ Wake word candidate rejected: within debounce window")
                     else:
