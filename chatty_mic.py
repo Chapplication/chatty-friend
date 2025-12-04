@@ -39,6 +39,10 @@ class WakeWordDetector:
         self.score_history = deque(maxlen=25)
         self.vad_history = deque(maxlen=25)
 
+        # --- Activity logging state (rate-limited to once per second)
+        self.last_activity_log_time = 0
+        self.activity_log_interval = 1.0  # seconds between VAD activity logs
+
         # trigger_level=4 → ≈ 320ms of sustained high scores
         cfg_trigger_level = master_state.conman.get_config("WAKE_TRIGGER_LEVEL")
         self.trigger_level = cfg_trigger_level if cfg_trigger_level is not None else 3
@@ -104,6 +108,17 @@ class WakeWordDetector:
 
         self.vad_history.append(is_voice)
 
+        # Calculate RMS for diagnostics
+        rms = self.calculate_signal_strength(audio_16ints)
+
+        # Rate-limited VAD activity logging (once per second when voice detected)
+        now = time.time()
+        if is_voice and (now - self.last_activity_log_time) >= self.activity_log_interval:
+            self.last_activity_log_time = now
+            self.master_state.add_log_for_next_summary(
+                f"🎙️ VAD activity: score={vad_score:.2f} (thresh={vad_threshold}), RMS={rms:.0f}"
+            )
+
         # return now if we're just filtering for voice (vs. listening for wakeword)
         if vad_only:
             return (is_voice, False)
@@ -136,6 +151,22 @@ class WakeWordDetector:
         wake_candidate = has_sustained_high_scores and has_recent_voice
 
         is_wake_word = False
+
+        # Log near-activation events (rate-limited): scores approaching threshold
+        # This helps debug cases where someone's voice almost triggers wake word
+        near_threshold = wake_threshold * 0.6  # 60% of threshold = "near" activation
+        if max_score >= near_threshold and not wake_candidate:
+            if (now - self.last_activity_log_time) >= self.activity_log_interval:
+                self.last_activity_log_time = now
+                reason = []
+                if not has_sustained_high_scores:
+                    reason.append(f"scores not sustained (need {self.trigger_level} frames >= {wake_threshold})")
+                if not has_recent_voice:
+                    reason.append(f"no recent VAD (lookback={self.vad_trigger_lookback})")
+                self.master_state.add_log_for_next_summary(
+                    f"👂 Near-activation: wake_score={max_score:.2f} (thresh={wake_threshold}), "
+                    f"RMS={rms:.0f}, VAD={is_voice}, reason: {'; '.join(reason)}"
+                )
 
         if wake_candidate:
             # RMS-energy filter + debounce + safe error handling
