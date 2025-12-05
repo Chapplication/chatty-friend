@@ -50,6 +50,8 @@ class ChattyMasterState:
         self.system_type = self.get_system_type()
         self.conman = ConfigManager()
         self.secrets_manager = SecretsManager()
+        self.auto_summary_count = 0
+        self.auto_summary_auto_resume_limit = 3
 
         openai_api_key = self.secrets_manager.get_secret("chat_api_key")
         if not openai_api_key:
@@ -162,6 +164,7 @@ class ChattyMasterState:
                     self.do_auto_summarize()
 
     async def do_auto_summarize(self):
+        self.auto_summary_count += 1
         self.should_summarize = True
         await send_assistant_text_from_system(self, PAUSING_FOR_SUMMARY_INSTRUCTIONS)
         print("🔄 Automatic conversation summary")

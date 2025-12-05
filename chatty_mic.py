@@ -69,13 +69,18 @@ class WakeWordDetector:
                     break
                 except Exception as e:
                     print(f"OpenWakeWord exception: {e}")
+                    self.master_state.add_log_for_next_summary(f"⚠️ OpenWakeWord exception loading {wake_word_file}: {e}")
                     pass
             if oww:
                 print("✅ OpenWakeWord model loaded")
+                self.master_state.add_log_for_next_summary(f"✅ Wake word model loaded: {wake_word_file}")
                 self.model = oww
             else:
                 print("❌ Failed to load OpenWakeWord model")
+                self.master_state.add_log_for_next_summary("❌ Wake word model failed to load; mic will fall back to always-on")
                 self.model = None
+        else:
+            self.master_state.add_log_for_next_summary("❌ OpenWakeWord not available; mic will fall back to always-on")
 
         self.last_wake_word_detected = None
 
@@ -259,6 +264,7 @@ async def mic_listener(manager: AsyncManager) -> None:
             mic_is_live_to_assistant = True
             user_is_speaking = True
             await manager.event_q.put(USER_SAID_WAKE_WORD)
+            manager.master_state.add_log_for_next_summary("⚠️ Wake detection unavailable; mic started in always-on mode (auto wake word)")
         else:
             # we are in QA mode on mac, require push to talk start event
             push_to_talk_active = False

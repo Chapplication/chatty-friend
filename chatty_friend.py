@@ -150,8 +150,11 @@ async def assistant_go_live():
         await master_state.start_tasks(managers)
 
         if is_automated_restart_after_summary:
-            await master_state.add_to_transcript("system", await setup_assistant_session(master_state, SUMMARY_INSTRUCTIONS))
-            managers["mic"].command_q.put_nowait(ASSISTANT_RESUME_AFTER_AUTO_SUMMARY)
+            if master_state.auto_summary_count < master_state.auto_summary_auto_resume_limit:
+                await master_state.add_to_transcript("system", await setup_assistant_session(master_state, SUMMARY_INSTRUCTIONS))
+                managers["mic"].command_q.put_nowait(ASSISTANT_RESUME_AFTER_AUTO_SUMMARY)
+            else:
+                print("⏸️ Auto-summary limit reached; waiting for wake word to resume")
         elif just_rebooted:
             await managers["speaker"].command_q.put(SPEAKER_PLAY_TONE+":"+CHATTY_SONG_STARTUP)
             just_rebooted = False
@@ -167,6 +170,7 @@ async def assistant_go_live():
                     elif source in ["mic","keyboard"]:
                         if result == USER_SAID_WAKE_WORD:
                             print("🔄 USER_SAID_WAKE_WORD received from MIC")
+                            master_state.auto_summary_count = 0  # reset auto-resume budget on explicit wake
                             await master_state.add_to_transcript("system", await setup_assistant_session(master_state, WAKE_UP_INSTRUCTIONS))
                             await managers["speaker"].command_q.put(SPEAKER_PLAY_TONE+":"+CHATTY_SONG_AWAKE)
                         elif result == USER_STARTED_SPEAKING:
