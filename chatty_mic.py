@@ -45,11 +45,11 @@ class WakeWordDetector:
 
         # trigger_level=4 → ≈ 320ms of sustained high scores
         cfg_trigger_level = master_state.conman.get_config("WAKE_TRIGGER_LEVEL")
-        self.trigger_level = cfg_trigger_level if cfg_trigger_level is not None else 3
+        self.trigger_level = cfg_trigger_level if cfg_trigger_level is not None else 1
 
         # vad_trigger_lookback=10 → ≈ 800ms of "recent voice" required
         cfg_vad_lookback = master_state.conman.get_config("VAD_TRIGGER_LOOKBACK")
-        self.vad_trigger_lookback = cfg_vad_lookback if cfg_vad_lookback is not None else 7
+        self.vad_trigger_lookback = cfg_vad_lookback if cfg_vad_lookback is not None else 3
 
         # RMS window: ~0.75s of audio for energy check
         self.rms_window_samples = int(0.75 * self.sample_rate)  # 12000
