@@ -86,7 +86,6 @@ class WakeWordDetector:
         self.last_wake_word_detected = None
         # Use monotonic time for better reliability in debounce checks
         self._monotonic_time = time.monotonic if hasattr(time, 'monotonic') else time.time
-        self._last_quality_check_time = 0
 
     def calculate_signal_strength(self, audio_samples: np.ndarray) -> float:
         """Calculate RMS (Root Mean Square) amplitude of audio signal."""
@@ -161,13 +160,6 @@ class WakeWordDetector:
         rms = self.calculate_signal_strength(audio_16ints)
 
         now = time.time()
-        
-        # Check audio quality (only log issues occasionally to avoid spam)
-        if not vad_only and (now - getattr(self, '_last_quality_check_time', 0)) > 5.0:
-            has_issues, issue_desc = self.detect_audio_quality_issues(audio_16ints)
-            if has_issues:
-                self.master_state.add_log_for_next_summary(f"⚠️ Audio quality issue: {issue_desc} (RMS={rms:.0f})")
-            self._last_quality_check_time = now
         # return now if we're just filtering for voice (vs. listening for wakeword)
         if vad_only:
             return (is_voice, False)
