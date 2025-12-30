@@ -1,6 +1,6 @@
 aioconsole==0.8.1
 aiohappyeyeballs==2.6.1
-aiohttp==3.12.15
+aiohttp>=3.9.0
 aiohttp-retry==2.9.1
 aiosignal==1.4.0
 altair==5.5.0
@@ -72,4 +72,4 @@ tzdata==2025.2
 urllib3==2.5.0
 websockets==15.0.1
 wikipedia==1.4.0
-yarl==1.20.1
+yarl>=1.9.0
