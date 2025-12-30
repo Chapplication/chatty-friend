@@ -1,6 +1,9 @@
 #!/bin/bash
 cd /home/chatty/chatty-friend
 
+# Wait for network to come up on boot
+sleep 10
+
 while true; do
     bin/python chatty_friend.py
     exit_code=$?

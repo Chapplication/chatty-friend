@@ -107,8 +107,8 @@ async def assistant_go_live():
             os.system("espeak -v en-us -a 20 '"+message+"'")
         except Exception as e:
             print(f"❌ Error in do_early_exit: {e}")
-        await asyncio.sleep(10)
-        exit(NORMAL_EXIT)
+        await asyncio.sleep(60)  # Wait 60 seconds before retry
+        exit(1)  # Exit with code 1 to trigger restart loop
 
     if not is_online():
        await do_early_exit("Cannot find Wifi.  please connect to the device hotspot and browse to 10 dot 42 dot 0 dot 1 to configure.")
