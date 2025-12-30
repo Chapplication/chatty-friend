@@ -36,6 +36,7 @@ def is_supabase_configured() -> bool:
     )
 
 # Local file for storing auth tokens and device ID
+# Same pattern as chatty_config.json - simple relative path
 SUPABASE_AUTH_FILE = "chatty_supabase_auth.json"
 
 

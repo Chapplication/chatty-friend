@@ -1202,7 +1202,7 @@ else:  # we have wifi and authentication!
                                 success, message = supabase.signup(new_email, new_password)
                                 if success:
                                     st.success(f"✅ {message}")
-                                    st.rerun()
+                                    st.info("📧 **Check your email!** Click the confirmation link to verify your account, then come back here and log in.")
                                 else:
                                     st.error(f"❌ {message}")
                 

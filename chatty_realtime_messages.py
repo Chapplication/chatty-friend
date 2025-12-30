@@ -63,6 +63,11 @@ def build_transcription_prompt(master_state):
     if wake_word:
         prompt_parts.append(f"Assistant's name: {wake_word}")
     
+    # Extract language preference
+    language = master_state.conman.get_config("LANGUAGE")
+    if language:
+        prompt_parts.append(f"Expected language: {language}")
+    
     # Extract key terms from user profile
     user_profile = master_state.conman.get_config("USER_PROFILE") or []
     if user_profile:
