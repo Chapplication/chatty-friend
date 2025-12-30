@@ -3,7 +3,8 @@
 
 import asyncio
 from chatty_async_manager import AsyncManager
-from chatty_dsp import upsample_audio_efficient
+from chatty_dsp import upsample_audio_efficient, apply_simple_noise_gate
+import numpy as np
 from chatty_config import MASTER_EXIT_EVENT, CHUNK_DURATION_MS
 
 from chatty_realtime_messages import send_audio_to_assistant
@@ -24,7 +25,14 @@ async def stream_to_assistant(manager: AsyncManager):
             for event_type, event in events:
                 if event_type == "input":
                     if manager.master_state.ws:
+                        # Apply noise gate if configured (disabled by default for RPi performance)
+                        # Only enable if experiencing significant background noise issues
+                        noise_gate_threshold = manager.master_state.conman.get_config("NOISE_GATE_THRESHOLD")
+                        if noise_gate_threshold is not None and noise_gate_threshold > 0:
+                            event = apply_simple_noise_gate(event, threshold=float(noise_gate_threshold))
+                        
                         # event is audio_16ints (np.ndarray) at 16000hz so we need to up-sample to 24000hz
+                        # This upsampling is optimized for RPi: simple linear interpolation, minimal CPU
                         upsampled_buffer = upsample_audio_efficient(event)
 
                         # when socket first connects, hold on to a few frames so the assistant gets enough to infer language

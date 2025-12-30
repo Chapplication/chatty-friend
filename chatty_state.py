@@ -11,6 +11,8 @@ import time
 from chatty_supervisor import report_conversation_to_supervisor
 from chatty_realtime_messages import send_assistant_text_from_system
 from chatty_embed import ChattyEmbed
+from chatty_communications import chatty_send_email
+from chatty_communications import chatty_send_email
 
 DEBUGGING = True
 PAUSING_FOR_SUMMARY_INSTRUCTIONS = "You're going offline for a moment.  let the user know you need a moment and will be back soon."
@@ -52,6 +54,12 @@ class ChattyMasterState:
         self.secrets_manager = SecretsManager()
         self.auto_summary_count = 0
         self.auto_summary_auto_resume_limit = 3
+        
+        # Cost tracking
+        self.daily_cost_history = {}  # date_string -> total_cost
+        self.monthly_cost_history = {}  # year-month -> total_cost
+        self.last_cost_alert_date = None
+        self.cost_alert_sent_today = False
 
         openai_api_key = self.secrets_manager.get_secret("chat_api_key")
         if not openai_api_key:
@@ -126,7 +134,18 @@ class ChattyMasterState:
 
         if hasattr(self, "transcript_history") and self.transcript_history:
             await report_conversation_to_supervisor(self)
-            print(f"**** Total cost : ${sum([u['cost'] for u in self.usage_history]):0.2f} ***** ")   
+            session_cost = sum([u['cost'] for u in self.usage_history])
+            message_count = len(self.transcript_history)
+            print(f"**** Total cost : ${session_cost:.2f} ***** ")
+            
+            # Reset cost alert flag for new day
+            from chatty_config import get_current_date_string
+            today = get_current_date_string()
+            if self.last_cost_alert_date != today:
+                self.cost_alert_sent_today = False
+            
+            # Supabase sync: try once, don't block on failure
+            await self._sync_to_supabase(session_cost, message_count)
 
         self.transcript_history = []
         self.usage_history = []
@@ -134,6 +153,48 @@ class ChattyMasterState:
         self.remote_assistant_state = {}
         self.ws = None
         self.last_activity_time = None
+    
+    async def _sync_to_supabase(self, session_cost: float, message_count: int):
+        """
+        Sync usage stats and check for updates from Supabase.
+        Try once at conversation end, fail silently if unsuccessful.
+        """
+        try:
+            from chatty_supabase import get_supabase_manager
+            
+            supabase = get_supabase_manager(self.conman, self.secrets_manager)
+            
+            if not supabase.is_device_linked():
+                return  # Not linked to Supabase, skip sync
+            
+            usage_stats = {
+                "cost": session_cost,
+                "message_count": message_count
+            }
+            
+            # Try to sync - this pushes usage and checks for config/upgrade flags
+            success, new_config, new_secrets = supabase.sync_at_conversation_end(
+                usage_stats,
+                self.conman.config if self.conman else None
+            )
+            
+            if success:
+                # Apply new config if received (cloud wins, volume stays local)
+                if new_config:
+                    print("☁️ Applying updated configuration from cloud")
+                    self.conman.save_config(new_config)
+                
+                # Check for upgrade flag
+                if supabase.check_upgrade_pending():
+                    print("☁️ Upgrade pending - will trigger upgrade on next cycle")
+                    self.should_upgrade = True
+            
+        except ImportError:
+            # Supabase module not available, skip silently
+            pass
+        except Exception as e:
+            # Log but don't fail - device operation is more important than sync
+            print(f"☁️ Supabase sync skipped: {e}")
 
     def flow_control_event(self):
         return any([self.should_quit, self.should_upgrade, self.should_reset_session, self.should_summarize])
@@ -144,8 +205,38 @@ class ChattyMasterState:
             self.dismiss_assistant("sleep")
 
     async def check_auto_summarize_n_messages(self):
-
-        # auto summarize if transcript is too long; TODO should prob base on audio duration for token budget
+        """Check if we should auto-summarize based on token usage or message count"""
+        # Check token-based summarization first (more accurate)
+        if hasattr(self, 'usage_history') and self.usage_history:
+            # Estimate total tokens used so far
+            # Rough estimate: 1 audio token ≈ 0.6 seconds of audio, 1 text token ≈ 4 characters
+            # We track costs, so we can estimate tokens from costs
+            try:
+                total_cost = sum([u.get("cost", 0) for u in self.usage_history])
+                cost_sheet = self.conman.get_config("TOKEN_COST_PER_MILLION")
+                if cost_sheet:
+                    # Estimate tokens: cost / (cost_per_million / 1_000_000)
+                    # Use average of input and output token costs
+                    avg_input_cost = (cost_sheet.get("per_input_text_token", 0) + 
+                                     cost_sheet.get("per_input_audio_token", 0)) / 2_000_000
+                    avg_output_cost = (cost_sheet.get("per_output_text_token", 0) + 
+                                      cost_sheet.get("per_output_audio_token", 0)) / 2_000_000
+                    # Rough split: 60% input, 40% output
+                    estimated_tokens = int((total_cost * 0.6 / avg_input_cost) + (total_cost * 0.4 / avg_output_cost))
+                    
+                    # Auto-summarize if we've used more than ~50k tokens (roughly $0.50-1.00 depending on model)
+                    max_tokens_before_summary = self.conman.get_config("AUTO_SUMMARIZE_MAX_TOKENS")
+                    if max_tokens_before_summary is None:
+                        max_tokens_before_summary = 50000  # default
+                    
+                    if estimated_tokens > max_tokens_before_summary:
+                        print(f"🔄 Auto-summarizing due to token usage: ~{estimated_tokens} tokens")
+                        await self.do_auto_summarize()
+                        return
+            except Exception as e:
+                print(f"⚠️ Error in token-based summarization check: {e}")
+        
+        # Fallback to message-based summarization
         try:
             n = self.conman.get_config("AUTO_SUMMARIZE_EVERY_N_MESSAGES")
             n = max(int(n), 4)
@@ -155,7 +246,7 @@ class ChattyMasterState:
         if self.transcript_history and self.transcript_history[-1]["role"] == "AI":
             ai_message_count = sum(1 for item in self.transcript_history if item["role"] == "AI")
             if ai_message_count % n == 0:
-                self.do_auto_summarize()
+                await self.do_auto_summarize()
 
     async def check_auto_summarize_time(self):
         if self.remote_assistant_state:
@@ -186,6 +277,83 @@ class ChattyMasterState:
         self.usage_history.append({"cost":cost})
         #print(f"Just spent ${cost:0.4f} on this response")
         #print(f"Total cost so far: ${sum([u['cost'] for u in self.usage_history]):0.2f}")
+        
+        # Update daily and monthly cost tracking
+        from chatty_config import get_current_date_string
+        today = get_current_date_string()
+        month_key = today[:7]  # YYYY-MM
+        
+        if today not in self.daily_cost_history:
+            self.daily_cost_history[today] = 0.0
+        self.daily_cost_history[today] += cost
+        
+        if month_key not in self.monthly_cost_history:
+            self.monthly_cost_history[month_key] = 0.0
+        self.monthly_cost_history[month_key] += cost
+        
+        # Check cost limits and alerts
+        self.check_cost_limits()
+
+    def check_cost_limits(self):
+        """Check daily/monthly cost limits and send alerts if needed"""
+        from chatty_config import get_current_date_string
+        import asyncio
+        
+        today = get_current_date_string()
+        daily_cost = self.daily_cost_history.get(today, 0.0)
+        month_key = today[:7]
+        monthly_cost = self.monthly_cost_history.get(month_key, 0.0)
+        
+        daily_limit = self.conman.get_config("DAILY_COST_LIMIT")
+        monthly_limit = self.conman.get_config("MONTHLY_COST_LIMIT")
+        alert_threshold = self.conman.get_config("COST_ALERT_THRESHOLD")
+        
+        # Check daily limit
+        if daily_limit is not None and daily_cost >= daily_limit:
+            print(f"⚠️ Daily cost limit reached: ${daily_cost:.2f} >= ${daily_limit:.2f}")
+            self.add_log_for_next_summary(f"⚠️ Daily cost limit reached: ${daily_cost:.2f}")
+            # Don't auto-pause, but log it - user can configure behavior if needed
+        
+        # Check monthly limit
+        if monthly_limit is not None and monthly_cost >= monthly_limit:
+            print(f"⚠️ Monthly cost limit reached: ${monthly_cost:.2f} >= ${monthly_limit:.2f}")
+            self.add_log_for_next_summary(f"⚠️ Monthly cost limit reached: ${monthly_cost:.2f}")
+        
+        # Check alert threshold (only alert once per day)
+        if alert_threshold is not None and daily_cost >= alert_threshold:
+            if not self.cost_alert_sent_today or self.last_cost_alert_date != today:
+                print(f"💰 Cost alert: Daily cost ${daily_cost:.2f} exceeds threshold ${alert_threshold:.2f}")
+                self.add_log_for_next_summary(f"💰 Cost alert: Daily cost ${daily_cost:.2f}")
+                self.cost_alert_sent_today = True
+                self.last_cost_alert_date = today
+                
+                # Send email alert to primary contact if configured
+                supervisor_contact = self.conman.get_contact_by_type("primary")
+                if supervisor_contact and hasattr(self, 'secrets_manager') and self.secrets_manager.has_email_configured():
+                    try:
+                        # Use asyncio to send email (if we're in an async context)
+                        loop = None
+                        try:
+                            loop = asyncio.get_event_loop()
+                        except RuntimeError:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                        
+                        if loop and not loop.is_closed():
+                            for supervisor in supervisor_contact:
+                                if supervisor and supervisor.get("email"):
+                                    subject = f"Chatty Friend Cost Alert - ${daily_cost:.2f} today"
+                                    message = f"Daily cost has reached ${daily_cost:.2f}, exceeding the alert threshold of ${alert_threshold:.2f}.\n\n"
+                                    message += f"Monthly cost so far: ${monthly_cost:.2f}\n"
+                                    if daily_limit:
+                                        message += f"Daily limit: ${daily_limit:.2f}\n"
+                                    if monthly_limit:
+                                        message += f"Monthly limit: ${monthly_limit:.2f}\n"
+                                    
+                                    # Schedule email send
+                                    asyncio.create_task(chatty_send_email(self, supervisor["email"], subject, message))
+                    except Exception as e:
+                        print(f"⚠️ Error sending cost alert email: {e}")
 
     def dismiss_assistant(self, action=None):
         if not action:

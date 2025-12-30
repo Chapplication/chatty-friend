@@ -13,7 +13,9 @@ while true; do
         echo "Exiting without restart (code $exit_code)"
         break
     else
-        echo "Application exited with code $exit_code. Waiting 5 seconds before restart."
+        echo "Application exited with code $exit_code. Checking for updates before restart."
+        git pull
+        bin/pip install -r requirements.txt --quiet
         sleep 5
     fi
 done

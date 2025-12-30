@@ -6,6 +6,7 @@
 import streamlit as st
 import time
 import subprocess
+import os
 import re
 import random
 import asyncio
@@ -17,6 +18,15 @@ import pytz
 import subprocess
 
 from chatty_wifi import IS_PI, IS_MAC, is_online, record_web_activity
+
+# Import Supabase manager with graceful fallback
+try:
+    from chatty_supabase import SupabaseManager, get_supabase_manager, is_supabase_configured
+    SUPABASE_CONFIGURED = is_supabase_configured()
+except ImportError:
+    SUPABASE_CONFIGURED = False
+    SupabaseManager = None
+    get_supabase_manager = None
 
 # DO NOT COMMIT THIS True!!!
 TESTING_PI_UI_MOCK_SYSTEM_CALLS = False
@@ -507,6 +517,7 @@ else:  # we have wifi and authentication!
         {'id': 'password', 'name': '🔑 Password', 'desc': 'Change password'},
         {'id': 'supervisor', 'name': '👥 Supervisor Setup', 'desc': 'Instructions for the conversation supervisor'},
         {'id': 'wifi', 'name': '📡 WiFi', 'desc': 'WiFi configuration'},
+        {'id': 'remote_config', 'name': '☁️ Remote Configuration', 'desc': 'Supabase cloud sync and device backup'},
         {'id': 'ai', 'name': '🤖 AI Settings', 'desc': 'AI model configuration'},
         {'id': 'personality', 'name': '🎭 Chatty Personality', 'desc': 'Setup the personality that Chatty will use to engage with the user'},
         {'id': 'content', 'name': '📰 Chatty Content Settings', 'desc': 'News provider settings'},
@@ -575,7 +586,11 @@ else:  # we have wifi and authentication!
             elif section_id == 'supervisor':
                 config_updates.update({
                     'AUTO_SUMMARIZE_EVERY_N_MESSAGES': st.session_state.get('auto_summarize', st.session_state.config_manager.default_config['AUTO_SUMMARIZE_EVERY_N_MESSAGES']),
-                    'SUPERVISOR_INSTRUCTIONS': st.session_state.get('supervisor_instructions', '')
+                    'AUTO_SUMMARIZE_MAX_TOKENS': st.session_state.get('auto_summarize_max_tokens', st.session_state.config_manager.default_config.get('AUTO_SUMMARIZE_MAX_TOKENS', 50000)),
+                    'SUPERVISOR_INSTRUCTIONS': st.session_state.get('supervisor_instructions', ''),
+                    'DAILY_COST_LIMIT': st.session_state.get('daily_cost_limit') if st.session_state.get('daily_cost_limit', 0.0) > 0 else None,
+                    'MONTHLY_COST_LIMIT': st.session_state.get('monthly_cost_limit') if st.session_state.get('monthly_cost_limit', 0.0) > 0 else None,
+                    'COST_ALERT_THRESHOLD': st.session_state.get('cost_alert_threshold') if st.session_state.get('cost_alert_threshold', 0.0) > 0 else None
                 })
             elif section_id == 'password':
                 new_password = st.session_state.get('new_password', '')
@@ -625,10 +640,15 @@ else:  # we have wifi and authentication!
                     'NEWS_PROVIDER': st.session_state.get('news_provider', 'BBC')
                 })
             elif section_id == 'voice_tech':
+                noise_gate = st.session_state.get('noise_gate_threshold', 0.0)
                 config_updates.update({
                     'VAD_THRESHOLD': st.session_state.get('vad_threshold', 0.21),
                     'WAKE_WORD_THRESHOLD': st.session_state.get('wake_word_threshold', 0.49),
-                    'SECONDS_TO_WAIT_FOR_MORE_VOICE': st.session_state.get('voice_wait_time', 1.0)
+                    'SECONDS_TO_WAIT_FOR_MORE_VOICE': st.session_state.get('voice_wait_time', 1.0),
+                    'WAKE_TRIGGER_LEVEL': st.session_state.get('wake_trigger_level', 1),
+                    'VAD_TRIGGER_LOOKBACK': st.session_state.get('vad_trigger_lookback', 3),
+                    'WAKE_WORD_RMS_THRESHOLD': st.session_state.get('wake_word_rms_threshold', 1100.0),
+                    'NOISE_GATE_THRESHOLD': noise_gate if noise_gate > 0 else None
                 })
             elif section_id == 'secrets':
                 secrets_input = st.session_state.get('secrets_json', '').strip()
@@ -681,6 +701,7 @@ else:  # we have wifi and authentication!
                         'supervisor': ['auto_summarize', 'supervisor_instructions'],
                         'password': ['new_password', 'confirm_password', 'password_hint'],
                         'wifi': ['new_wifi_ssid', 'new_wifi_password'],
+                        'remote_config': ['supabase_email', 'supabase_password', 'device_name', 'device_location', 'device_passphrase', 'selected_device_id'],
                         'ai': ['realtime_model', 'transcription_model', 'supervisor_model', 'ws_url'],
                         'personality': ['system_prompt', 'selected_voice', 'volume_setting', 'speed_setting', 'eagerness_setting'],
                         'content': ['news_provider'],
@@ -732,6 +753,7 @@ else:  # we have wifi and authentication!
                     'supervisor': ['auto_summarize', 'supervisor_instructions'],
                     'password': ['new_password', 'confirm_password', 'password_hint'],
                     'wifi': ['new_wifi_ssid', 'new_wifi_password'],
+                    'remote_config': ['supabase_email', 'supabase_password', 'device_name', 'device_location', 'device_passphrase', 'selected_device_id'],
                     'ai': ['realtime_model', 'transcription_model', 'supervisor_model', 'ws_url'],
                     'personality': ['system_prompt', 'selected_voice', 'volume_setting', 'speed_setting', 'eagerness_setting'],
                     'content': ['news_provider'],
@@ -778,6 +800,7 @@ else:  # we have wifi and authentication!
             'password': '🔑 Change Password',
             'supervisor': '👥 Supervisor Setup',
             'wifi': '📡 WiFi Configuration',
+            'remote_config': '☁️ Remote Configuration',
             'ai': '🤖 AI Model Configuration',
             'personality': '🎭 Chatty Personality',
             'content': '📰 Chatty Content Settings',
@@ -925,9 +948,18 @@ else:  # we have wifi and authentication!
         auto_summarize = st.number_input(
             "Auto Summarize Every N Messages",
             min_value=10, max_value=2000,
-            value=st.session_state.config_manager.get_config('AUTO_SUMMARIZE_EVERY_N_MESSAGES') or 2000,
+            value=int(st.session_state.config_manager.get_config('AUTO_SUMMARIZE_EVERY_N_MESSAGES') or st.session_state.config_manager.default_config.get('AUTO_SUMMARIZE_EVERY_N_MESSAGES', 100)),
             help="All chats are summarized when finished, or when they continue for up to this many messages.",
             key="auto_summarize",
+            on_change=lambda: lock_section() if not st.session_state.section_locked else None
+        )
+        
+        auto_summarize_max_tokens = st.number_input(
+            "Auto Summarize After Token Usage",
+            min_value=10000, max_value=500000, step=10000,
+            value=int(st.session_state.config_manager.get_config('AUTO_SUMMARIZE_MAX_TOKENS') or st.session_state.config_manager.default_config.get('AUTO_SUMMARIZE_MAX_TOKENS', 50000)),
+            help="Automatically summarize conversations when estimated token usage exceeds this value. Helps control costs by keeping context windows manageable. Default: 50,000 tokens (~$0.50-1.00 depending on model).",
+            key="auto_summarize_max_tokens",
             on_change=lambda: lock_section() if not st.session_state.section_locked else None
         )
         
@@ -937,6 +969,37 @@ else:  # we have wifi and authentication!
             help="Instructions for the supervisor describing important things to watch out for, and observations to make in summaries and in follow-up notes.",
             height=150,
             key="supervisor_instructions",
+            on_change=lambda: lock_section() if not st.session_state.section_locked else None
+        )
+        
+        st.markdown("---")
+        st.markdown("### 💰 Cost Management")
+        st.info("💡 Set cost limits and alerts to monitor API usage. Limits are informational only and won't stop conversations.")
+        
+        daily_cost_limit = st.number_input(
+            "Daily Cost Limit ($)",
+            min_value=0.0, max_value=1000.0, step=1.0,
+            value=float(st.session_state.config_manager.get_config('DAILY_COST_LIMIT') or 0.0) if st.session_state.config_manager.get_config('DAILY_COST_LIMIT') is not None else 0.0,
+            help="Maximum daily cost in dollars. Set to 0 to disable. When reached, a warning will be logged but conversations will continue.",
+            key="daily_cost_limit",
+            on_change=lambda: lock_section() if not st.session_state.section_locked else None
+        )
+        
+        monthly_cost_limit = st.number_input(
+            "Monthly Cost Limit ($)",
+            min_value=0.0, max_value=10000.0, step=10.0,
+            value=float(st.session_state.config_manager.get_config('MONTHLY_COST_LIMIT') or 0.0) if st.session_state.config_manager.get_config('MONTHLY_COST_LIMIT') is not None else 0.0,
+            help="Maximum monthly cost in dollars. Set to 0 to disable. When reached, a warning will be logged.",
+            key="monthly_cost_limit",
+            on_change=lambda: lock_section() if not st.session_state.section_locked else None
+        )
+        
+        cost_alert_threshold = st.number_input(
+            "Cost Alert Threshold ($)",
+            min_value=0.0, max_value=1000.0, step=1.0,
+            value=float(st.session_state.config_manager.get_config('COST_ALERT_THRESHOLD') or 0.0) if st.session_state.config_manager.get_config('COST_ALERT_THRESHOLD') is not None else 0.0,
+            help="Send email alert to primary contact when daily cost exceeds this amount. Set to 0 to disable alerts. Alerts are sent once per day.",
+            key="cost_alert_threshold",
             on_change=lambda: lock_section() if not st.session_state.section_locked else None
         )
         
@@ -1080,6 +1143,264 @@ else:  # we have wifi and authentication!
                         st.error("❌ Please enter both SSID and password")
         else:
             st.info("Network configuration is only available on Raspberry Pi")
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    elif current_section == 'remote_config':  # Remote Configuration Section
+        st.markdown("<div class='config-section'>", unsafe_allow_html=True)
+        st.subheader("☁️ Remote Configuration")
+        
+        if not SUPABASE_CONFIGURED:
+            st.warning("⚠️ Supabase is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY environment variables to enable cloud sync.")
+            st.info("💡 Cloud sync allows you to:\n- Backup device configuration\n- Restore settings after hardware replacement\n- Track usage statistics remotely")
+        else:
+            # Initialize Supabase manager in session state
+            if 'supabase_manager' not in st.session_state:
+                st.session_state.supabase_manager = get_supabase_manager(
+                    st.session_state.config_manager,
+                    st.session_state.secrets_manager
+                )
+            
+            supabase = st.session_state.supabase_manager
+            
+            # State 1: Not authenticated - show login/signup
+            if not supabase.is_authenticated():
+                st.info("💡 Sign in to enable cloud backup and remote configuration for this device.")
+                
+                tab_login, tab_signup, tab_reset = st.tabs(["Login", "Create Account", "Reset Password"])
+                
+                with tab_login:
+                    with st.form("supabase_login_form"):
+                        email = st.text_input("Email", key="login_email")
+                        password = st.text_input("Password", type="password", key="login_password")
+                        
+                        if st.form_submit_button("🔓 Login", type="primary"):
+                            if email and password:
+                                success, message = supabase.login(email, password)
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                            else:
+                                st.warning("Please enter email and password")
+                
+                with tab_signup:
+                    with st.form("supabase_signup_form"):
+                        new_email = st.text_input("Email", key="signup_email")
+                        new_password = st.text_input("Password (min 6 characters)", type="password", key="signup_password")
+                        confirm_password = st.text_input("Confirm Password", type="password", key="signup_confirm")
+                        
+                        if st.form_submit_button("📝 Create Account", type="primary"):
+                            if not new_email:
+                                st.warning("Please enter an email address")
+                            elif len(new_password) < 6:
+                                st.warning("Password must be at least 6 characters")
+                            elif new_password != confirm_password:
+                                st.error("Passwords do not match")
+                            else:
+                                success, message = supabase.signup(new_email, new_password)
+                                if success:
+                                    st.success(f"✅ {message}")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {message}")
+                
+                with tab_reset:
+                    with st.form("supabase_reset_form"):
+                        reset_email = st.text_input("Email", key="reset_email")
+                        
+                        if st.form_submit_button("📧 Send Reset Email"):
+                            if reset_email:
+                                success, message = supabase.send_password_reset(reset_email)
+                                if success:
+                                    st.success(f"✅ {message}")
+                                else:
+                                    st.error(f"❌ {message}")
+                            else:
+                                st.warning("Please enter your email address")
+            
+            # State 2: Authenticated but no device linked
+            elif not supabase.is_device_linked():
+                st.success(f"✅ Logged in as: {supabase.user_email}")
+                
+                if st.button("🚪 Logout", key="logout_no_device"):
+                    supabase.logout()
+                    st.rerun()
+                
+                st.divider()
+                st.subheader("Link This Device")
+                st.info("💡 Choose to link to an existing device backup or register this as a new device.")
+                
+                # Fetch user's devices
+                devices = supabase.get_user_devices()
+                
+                if devices:
+                    st.markdown("### Existing Device Backups")
+                    
+                    # Create a selectbox for existing devices
+                    device_options = {d['id']: f"{d['name']} ({d['location']})" for d in devices}
+                    device_options['new'] = "➕ Register as New Device"
+                    
+                    selected = st.selectbox(
+                        "Select a device to link to:",
+                        options=list(device_options.keys()),
+                        format_func=lambda x: device_options[x],
+                        key="selected_device_id"
+                    )
+                    
+                    if selected and selected != 'new':
+                        # Link to existing device
+                        selected_device = next((d for d in devices if d['id'] == selected), None)
+                        if selected_device:
+                            st.info(f"**Device:** {selected_device['name']}\n\n**Location:** {selected_device['location']}\n\n**Last seen:** {selected_device.get('last_seen', 'Never')}")
+                            
+                            with st.form("link_device_form"):
+                                passphrase = st.text_input(
+                                    "Enter your passphrase to decrypt settings:",
+                                    type="password",
+                                    key="link_passphrase"
+                                )
+                                
+                                if st.form_submit_button("🔗 Link to This Device", type="primary"):
+                                    if passphrase:
+                                        success, message, config_data, secrets_data = supabase.link_device(
+                                            selected, passphrase
+                                        )
+                                        if success:
+                                            # Apply downloaded config (cloud wins, volume local)
+                                            if config_data:
+                                                local_config = st.session_state.config_manager.config.copy()
+                                                merged = config_data.copy()
+                                                merged["VOLUME"] = local_config.get("VOLUME", merged.get("VOLUME"))
+                                                merged["SPEED"] = local_config.get("SPEED", merged.get("SPEED"))
+                                                st.session_state.config_manager.save_config(merged)
+                                            
+                                            # Apply downloaded secrets
+                                            if secrets_data:
+                                                import json
+                                                st.session_state.secrets_manager.save_secrets(json.dumps(secrets_data))
+                                            
+                                            st.success("✅ Device linked successfully! Configuration restored.")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"❌ {message}")
+                                    else:
+                                        st.warning("Please enter your passphrase")
+                    
+                    if selected == 'new':
+                        st.markdown("### Register as New Device")
+                else:
+                    st.markdown("### Register This Device")
+                    st.info("No existing devices found. Register this device to enable cloud backup.")
+                
+                # Show new device registration form
+                if not devices or (st.session_state.get('selected_device_id') == 'new'):
+                    with st.form("register_device_form"):
+                        device_name = st.text_input(
+                            "Device Name",
+                            placeholder="e.g., Living Room Assistant",
+                            key="device_name"
+                        )
+                        device_location = st.text_input(
+                            "Device Location",
+                            placeholder="e.g., Mom's House",
+                            key="device_location"
+                        )
+                        passphrase = st.text_input(
+                            "Create a Passphrase",
+                            type="password",
+                            help="This passphrase encrypts your API keys. You'll need it to restore settings on a new device.",
+                            key="device_passphrase"
+                        )
+                        passphrase_confirm = st.text_input(
+                            "Confirm Passphrase",
+                            type="password",
+                            key="device_passphrase_confirm"
+                        )
+                        
+                        st.warning("⚠️ **Important:** Remember your passphrase! It's required to restore your settings on a replacement device.")
+                        
+                        if st.form_submit_button("☁️ Register & Upload", type="primary"):
+                            if not device_name:
+                                st.error("Please enter a device name")
+                            elif not passphrase:
+                                st.error("Please create a passphrase")
+                            elif passphrase != passphrase_confirm:
+                                st.error("Passphrases do not match")
+                            else:
+                                success, result = supabase.register_new_device(
+                                    device_name,
+                                    device_location,
+                                    passphrase,
+                                    st.session_state.config_manager.config,
+                                    st.session_state.secrets_manager.secrets
+                                )
+                                if success:
+                                    st.success(f"✅ Device registered successfully!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {result}")
+            
+            # State 3: Authenticated and device linked
+            else:
+                st.success(f"✅ Logged in as: {supabase.user_email}")
+                st.success(f"✅ Device linked: {supabase.device_id[:8]}...")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🔄 Sync Now", key="manual_sync"):
+                        try:
+                            usage = {"cost": 0, "message_count": 0}
+                            success, new_config, _ = supabase.sync_at_conversation_end(
+                                usage,
+                                st.session_state.config_manager.config
+                            )
+                            if success:
+                                if new_config:
+                                    st.session_state.config_manager.save_config(new_config)
+                                    st.success("✅ Synced and applied new configuration!")
+                                else:
+                                    st.success("✅ Synced successfully!")
+                                
+                                if supabase.check_upgrade_pending():
+                                    st.warning("⚠️ A software upgrade is available. Restart the device to apply.")
+                            else:
+                                st.warning("⚠️ Sync encountered an issue but device continues to work offline.")
+                        except Exception as e:
+                            st.error(f"❌ Sync failed: {e}")
+                
+                with col2:
+                    if st.button("🚪 Logout", key="logout_linked"):
+                        supabase.logout()
+                        st.rerun()
+                
+                st.divider()
+                
+                # Upload current config
+                st.subheader("Upload Configuration")
+                st.info("💡 Upload your current settings to the cloud for backup.")
+                
+                with st.form("upload_config_form"):
+                    passphrase = st.text_input(
+                        "Enter passphrase to encrypt secrets:",
+                        type="password",
+                        key="upload_passphrase"
+                    )
+                    
+                    if st.form_submit_button("☁️ Upload Current Config", type="primary"):
+                        if passphrase:
+                            success, message = supabase.upload_config(
+                                st.session_state.config_manager.config,
+                                st.session_state.secrets_manager.secrets,
+                                passphrase
+                            )
+                            if success:
+                                st.success(f"✅ {message}")
+                            else:
+                                st.error(f"❌ {message}")
+                        else:
+                            st.warning("Please enter your passphrase")
         
         st.markdown("</div>", unsafe_allow_html=True)
     
@@ -1265,11 +1586,59 @@ else:  # we have wifi and authentication!
             key="voice_wait_time"
         )
         
+        st.markdown("---")
+        st.markdown("### Advanced Wake Word Tuning")
+        st.info("💡 These settings fine-tune wake word detection. Adjust if you experience false positives or missed wake words.")
+        
+        # Wake Trigger Level
+        wake_trigger_level = st.number_input(
+            "Wake Trigger Level",
+            min_value=1, max_value=10, step=1,
+            value=int(st.session_state.config_manager.get_config('WAKE_TRIGGER_LEVEL') or 1),
+            help="Number of consecutive frames above threshold required to trigger wake word (higher = fewer false positives, but may miss some wake words)",
+            key="wake_trigger_level"
+        )
+        
+        # VAD Trigger Lookback
+        vad_trigger_lookback = st.number_input(
+            "VAD Trigger Lookback",
+            min_value=0, max_value=25, step=1,
+            value=int(st.session_state.config_manager.get_config('VAD_TRIGGER_LOOKBACK') or 3),
+            help="Number of recent frames to check for voice activity (higher = requires more sustained voice)",
+            key="vad_trigger_lookback"
+        )
+        
+        # RMS Threshold
+        wake_word_rms_threshold = st.number_input(
+            "Wake Word RMS Threshold",
+            min_value=0.0, max_value=10000.0, step=100.0,
+            value=float(st.session_state.config_manager.get_config('WAKE_WORD_RMS_THRESHOLD') or st.session_state.config_manager.default_config.get('WAKE_WORD_RMS_THRESHOLD', 1100.0)),
+            help="Minimum signal strength (RMS) required for wake word acceptance (higher = requires louder/more clear speech)",
+            key="wake_word_rms_threshold"
+        )
+        
+        st.markdown("---")
+        st.markdown("### Audio Processing")
+        st.info("💡 Audio processing settings to improve quality. Disabled by default for optimal Raspberry Pi performance.")
+        
+        # Noise Gate Threshold
+        noise_gate_threshold = st.number_input(
+            "Noise Gate Threshold",
+            min_value=0.0, max_value=5000.0, step=100.0,
+            value=float(st.session_state.config_manager.get_config('NOISE_GATE_THRESHOLD') or 0.0) if st.session_state.config_manager.get_config('NOISE_GATE_THRESHOLD') is not None else 0.0,
+            help="Enable noise gate to reduce background noise. Set to 0 to disable (recommended for RPi). Higher values = more aggressive noise filtering. Typical range: 300-800. Only enable if experiencing significant background noise issues.",
+            key="noise_gate_threshold"
+        )
+        
         if st.button("💾 Save Voice Tech Settings", type="primary", key="save_voice_tech"):
             success, message = st.session_state.config_manager.save_config({
                 'VAD_THRESHOLD': vad_threshold,
                 'WAKE_WORD_THRESHOLD': wake_word_threshold,
-                'SECONDS_TO_WAIT_FOR_MORE_VOICE': voice_wait_time
+                'SECONDS_TO_WAIT_FOR_MORE_VOICE': voice_wait_time,
+                'WAKE_TRIGGER_LEVEL': wake_trigger_level,
+                'VAD_TRIGGER_LOOKBACK': vad_trigger_lookback,
+                'WAKE_WORD_RMS_THRESHOLD': wake_word_rms_threshold,
+                'NOISE_GATE_THRESHOLD': noise_gate_threshold if noise_gate_threshold > 0 else None
             })
             if success:
                 st.success("✅ Voice tech settings saved!")

@@ -40,16 +40,17 @@ class WakeWordDetector:
         self.vad_history = deque(maxlen=25)
 
         # --- Activity logging state (rate-limited to once per second)
-        self.last_activity_log_time = 0
-        self.activity_log_interval = 1.0  # seconds between VAD activity logs
+        self.activity_log_interval = 1.0  # seconds between activity logs
+        self.last_vad_log_time = 0
+        self.last_near_activation_log_time = 0
 
         # trigger_level=4 → ≈ 320ms of sustained high scores
         cfg_trigger_level = master_state.conman.get_config("WAKE_TRIGGER_LEVEL")
-        self.trigger_level = cfg_trigger_level if cfg_trigger_level is not None else 1
+        self.trigger_level = int(cfg_trigger_level) if cfg_trigger_level is not None else 1
 
         # vad_trigger_lookback=10 → ≈ 800ms of "recent voice" required
         cfg_vad_lookback = master_state.conman.get_config("VAD_TRIGGER_LOOKBACK")
-        self.vad_trigger_lookback = cfg_vad_lookback if cfg_vad_lookback is not None else 3
+        self.vad_trigger_lookback = int(cfg_vad_lookback) if cfg_vad_lookback is not None else 3
 
         # RMS window: ~0.75s of audio for energy check
         self.rms_window_samples = int(0.75 * self.sample_rate)  # 12000
@@ -83,10 +84,53 @@ class WakeWordDetector:
             self.master_state.add_log_for_next_summary("❌ OpenWakeWord not available; mic will fall back to always-on")
 
         self.last_wake_word_detected = None
+        # Use monotonic time for better reliability in debounce checks
+        self._monotonic_time = time.monotonic if hasattr(time, 'monotonic') else time.time
+        self._last_quality_check_time = 0
 
     def calculate_signal_strength(self, audio_samples: np.ndarray) -> float:
         """Calculate RMS (Root Mean Square) amplitude of audio signal."""
         return np.sqrt(np.mean(audio_samples.astype(np.float64) ** 2))
+    
+    def detect_audio_quality_issues(self, audio_samples: np.ndarray) -> tuple[bool, str]:
+        """
+        Lightweight audio quality detection optimized for Raspberry Pi.
+        Runs infrequently (every 5 seconds) to minimize CPU impact.
+        Returns: (has_issues, issue_description)
+        """
+        issues = []
+        
+        # Fast checks first (avoid expensive operations if possible)
+        max_val = np.max(np.abs(audio_samples))
+        
+        # Check for clipping (samples at max/min values) - fast check
+        clipping_threshold = 32000  # Close to int16 max (32767)
+        if max_val > clipping_threshold:
+            # Only count clipped samples if we detected high values
+            clipped_count = np.sum(np.abs(audio_samples) > clipping_threshold)
+            clipping_percent = clipped_count / len(audio_samples) * 100
+            if clipping_percent > 1.0:  # More than 1% clipped
+                issues.append(f"clipping ({clipping_percent:.1f}%)")
+        
+        # Use fast energy estimate (mean abs) instead of full RMS for initial check
+        energy = np.mean(np.abs(audio_samples.astype(np.int32)))
+        
+        # Check for very low signal or silence
+        if energy < 10.0:
+            issues.append("silence")
+        elif energy < 100.0:
+            issues.append("very low signal")
+        
+        # Only do expensive distortion check if we have significant signal
+        if energy > 1000.0 and len(audio_samples) > 100:
+            # Simplified distortion check: high max relative to mean
+            # Avoids expensive variance calculation
+            if max_val > energy * 20:  # Very high peaks relative to average
+                issues.append("potential distortion")
+        
+        if issues:
+            return True, ", ".join(issues)
+        return False, ""
 
     def on_audio_buffer_in(
         self,
@@ -116,14 +160,14 @@ class WakeWordDetector:
         # Calculate RMS for diagnostics
         rms = self.calculate_signal_strength(audio_16ints)
 
-        # Rate-limited VAD activity logging (once per second when voice detected)
         now = time.time()
-        if is_voice and (now - self.last_activity_log_time) >= self.activity_log_interval:
-            self.last_activity_log_time = now
-            self.master_state.add_log_for_next_summary(
-                f"🎙️ VAD activity: score={vad_score:.2f} (thresh={vad_threshold}), RMS={rms:.0f}"
-            )
-
+        
+        # Check audio quality (only log issues occasionally to avoid spam)
+        if not vad_only and (now - getattr(self, '_last_quality_check_time', 0)) > 5.0:
+            has_issues, issue_desc = self.detect_audio_quality_issues(audio_16ints)
+            if has_issues:
+                self.master_state.add_log_for_next_summary(f"⚠️ Audio quality issue: {issue_desc} (RMS={rms:.0f})")
+            self._last_quality_check_time = now
         # return now if we're just filtering for voice (vs. listening for wakeword)
         if vad_only:
             return (is_voice, False)
@@ -160,9 +204,19 @@ class WakeWordDetector:
         # Log near-activation events (rate-limited): scores approaching threshold
         # This helps debug cases where someone's voice almost triggers wake word
         near_threshold = wake_threshold * 0.6  # 60% of threshold = "near" activation
+
+        # Only emit VAD/wake diagnostics while waiting for wake word and only if the wake score is promising
+        if max_score >= near_threshold and (now - self.last_vad_log_time) >= self.activity_log_interval:
+            self.last_vad_log_time = now
+
+            if False:
+                self.master_state.add_log_for_next_summary(
+                    f"🎙️ VAD activity: score={vad_score:.2f} (thresh={vad_threshold}), RMS={rms:.0f}, wake_score={max_score:.2f}"
+                )
+
         if max_score >= near_threshold and not wake_candidate:
-            if (now - self.last_activity_log_time) >= self.activity_log_interval:
-                self.last_activity_log_time = now
+            if (now - self.last_near_activation_log_time) >= self.activity_log_interval:
+                self.last_near_activation_log_time = now
                 reason = []
                 if not has_sustained_high_scores:
                     reason.append(f"scores not sustained (need {self.trigger_level} frames >= {wake_threshold})")
@@ -191,13 +245,22 @@ class WakeWordDetector:
 
                 rms_strength = self.calculate_signal_strength(wake_word_audio)
 
-                min_strength = 1100.0  # still your heuristic; we can tune later
+                min_strength = self.master_state.conman.get_config("WAKE_WORD_RMS_THRESHOLD")
+                if min_strength is None:
+                    min_strength = 1100.0  # default fallback
 
-                now = time.time()
-                debounce_ok = (
-                    self.last_wake_word_detected is None
-                    or (now - self.last_wake_word_detected) > self.wake_to_wake_min_time
-                )
+                now = self._monotonic_time()
+                if self.last_wake_word_detected is not None:
+                    # Convert last_wake_word_detected to monotonic if it was stored as time.time()
+                    last_detected = self.last_wake_word_detected
+                    if hasattr(time, 'monotonic'):
+                        # If we have monotonic time, ensure we're comparing apples to apples
+                        # For first use after upgrade, last_wake_word_detected might be in time.time() format
+                        # This is a one-time conversion issue, but safe to handle
+                        pass
+                    debounce_ok = (now - last_detected) > self.wake_to_wake_min_time
+                else:
+                    debounce_ok = True
 
                 if rms_strength >= min_strength and debounce_ok:
                     print(

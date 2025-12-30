@@ -81,10 +81,14 @@ async def grand_central_dispatch(master_state) -> list[tuple[str, Any]]:
     except websockets.ConnectionClosed:
         print("🔄 Remote closed connection - summarizing")
         master_state.should_summarize = True
+        # Attempt to reconnect on next iteration
+        master_state.ws = None
     except Exception as e:
         print(f"❌ Error in grand_central_dispatch: {e}")
         import traceback
         traceback.print_exc()
+        # Mark websocket as invalid to trigger reconnection
+        master_state.ws = None
 
     return results
 
@@ -188,7 +192,7 @@ async def assistant_go_live():
 
             except Exception as e:
                 print(f"❌ Error in assistant_go_live: {e}")
-                master_state.add_log_for_next_summary("X non-keyboard exceptiopn assistant go live "+str(e))
+                master_state.add_log_for_next_summary("X non-keyboard exception assistant go live "+str(e))
                 import traceback
                 traceback.print_exc()
 
@@ -205,11 +209,12 @@ async def assistant_go_live():
             # drain any remaining audio
             deadman_audio_count = 0
             spkr = managers["speaker"]
+            max_wait_iterations = 200  # Increased from 100 to 200 (20 seconds total)
             while any([q.qsize() > 0 for q in [spkr.command_q, spkr.input_q, spkr.output_q]]):
                 await asyncio.sleep(0.1)
                 deadman_audio_count += 1
-                if deadman_audio_count > 100:
-                    print("🔄 DEADMAN AUDIO COUNT > 100")
+                if deadman_audio_count > max_wait_iterations:
+                    print(f"🔄 DEADMAN AUDIO COUNT > {max_wait_iterations}")
                     break
 
             # clean up 
@@ -234,7 +239,7 @@ async def assistant_go_live():
 
         except Exception as e:
             print("error in assistant_go_live inner loop cleanup")
-            master_state.add_log_for_next_summary("X exceptiopn inner loop "+str(e))
+            master_state.add_log_for_next_summary("X exception inner loop "+str(e))
 
             import traceback
             traceback.print_exc()
@@ -243,7 +248,7 @@ async def assistant_go_live():
         master_state.pa.terminate()
     except Exception as e:
         print("error in assistant_go_live outer loop cleanup")
-        master_state.add_log_for_next_summary("X exceptiopn outer loop "+str(e))
+        master_state.add_log_for_next_summary("X exception outer loop "+str(e))
         import traceback
         traceback.print_exc()
 

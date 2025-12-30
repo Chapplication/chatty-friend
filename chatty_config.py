@@ -242,6 +242,9 @@ default_config = {
     "WAKE_WORD_MODEL_CHOICES" : ["amanda", "oliver"],
     "VAD_THRESHOLD" : 0.3,
     "WAKE_WORD_THRESHOLD" : 0.55,
+    "WAKE_WORD_RMS_THRESHOLD" : 1100.0,
+    "WAKE_TRIGGER_LEVEL" : 1,
+    "VAD_TRIGGER_LOOKBACK" : 3,
     "SECONDS_TO_WAIT_FOR_MORE_VOICE" : 1.0,
     "CONFIG_PASSWORD" : "assistant",
     "CONFIG_PASSWORD_HINT": "assistant",
@@ -253,6 +256,11 @@ default_config = {
     "USER_NAME": "User",
     "ASSISTANT_EAGERNESS_TO_REPLY" : 50, # 0-100
     "AUTO_SUMMARIZE_EVERY_N_MESSAGES" : 100,
+    "AUTO_SUMMARIZE_MAX_TOKENS" : 50000,  # Auto-summarize when estimated token usage exceeds this
+    "DAILY_COST_LIMIT" : None,  # None = no limit, or set to dollar amount (e.g., 10.0)
+    "MONTHLY_COST_LIMIT" : None,  # None = no limit, or set to dollar amount
+    "COST_ALERT_THRESHOLD" : None,  # Alert when daily cost exceeds this (but don't stop)
+    "NOISE_GATE_THRESHOLD" : None,  # None = disabled (recommended for RPi), or set threshold (e.g., 500.0). Lower = more aggressive noise gating
     "MAX_PROFILE_ENTRIES" : 1000,
     "WIFI_SSID" : None,
     "WIFI_PASSWORD" : None,
@@ -415,6 +423,27 @@ class ConfigManager:
             self.config["VOICE_CHOICES"] = voice_choices[self.config["REALTIME_MODEL"]]
             self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[self.config["REALTIME_MODEL"]]
 
+        # Validate wake word configuration parameters
+        if "WAKE_TRIGGER_LEVEL" in self.config:
+            try:
+                level = int(self.config["WAKE_TRIGGER_LEVEL"])
+                if level < 1 or level > 10:
+                    print(f"Warning: WAKE_TRIGGER_LEVEL {level} out of range [1-10], resetting to default")
+                    missing_keys.append("WAKE_TRIGGER_LEVEL")
+            except (ValueError, TypeError):
+                print(f"Warning: Invalid WAKE_TRIGGER_LEVEL, resetting to default")
+                missing_keys.append("WAKE_TRIGGER_LEVEL")
+
+        if "VAD_TRIGGER_LOOKBACK" in self.config:
+            try:
+                lookback = int(self.config["VAD_TRIGGER_LOOKBACK"])
+                if lookback < 0 or lookback > 25:
+                    print(f"Warning: VAD_TRIGGER_LOOKBACK {lookback} out of range [0-25], resetting to default")
+                    missing_keys.append("VAD_TRIGGER_LOOKBACK")
+            except (ValueError, TypeError):
+                print(f"Warning: Invalid VAD_TRIGGER_LOOKBACK, resetting to default")
+                missing_keys.append("VAD_TRIGGER_LOOKBACK")
+
         # version is in the config so the website can see it but force sync to the code here
         missing_keys.extend(["CHATTY_FRIEND_VERSION"])
 
@@ -452,8 +481,11 @@ class ConfigManager:
             return False, f"Error saving config: {e}"
     
     def get_config(self, key: str) -> Optional[str]:
-        """Get a config value by key"""
-        return self.config.get(key)
+        """Get a config value by key, returning default if not found"""
+        if key in self.config:
+            return self.config[key]
+        # Return default if available
+        return self.default_config.get(key)
 
     def get_percent_config_as_0_to_100_int(self, key: str) -> Optional[float]:
         """Get a config value that should be a percentage 0 to 100 """

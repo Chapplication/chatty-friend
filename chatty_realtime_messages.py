@@ -42,6 +42,43 @@ def get_speed_from_percentage_int_0_to_100(speed):
     except:
         return 1.0
 
+def build_transcription_prompt(master_state):
+    """Build transcription prompt from user profile vocabulary"""
+    prompt_parts = []
+    
+    # Extract names from contacts
+    contacts = master_state.conman.get_config("CONTACTS") or []
+    if contacts:
+        names = [contact.get("name", "").strip() for contact in contacts if contact.get("name")]
+        if names:
+            prompt_parts.append("Common names: " + ", ".join(names))
+    
+    # Extract user name
+    user_name = master_state.conman.get_config("USER_NAME")
+    if user_name and user_name != "User":
+        prompt_parts.append(f"User's name: {user_name}")
+    
+    # Extract wake word name
+    wake_word = master_state.conman.get_config("WAKE_WORD_MODEL")
+    if wake_word:
+        prompt_parts.append(f"Assistant's name: {wake_word}")
+    
+    # Extract key terms from user profile
+    user_profile = master_state.conman.get_config("USER_PROFILE") or []
+    if user_profile:
+        # Look for common proper nouns and important terms
+        profile_text = " ".join([str(entry) for entry in user_profile if isinstance(entry, str)])
+        # Extract potential names/places (simple heuristic: capitalized words)
+        import re
+        capitalized_words = set(re.findall(r'\b[A-Z][a-z]+\b', profile_text))
+        if capitalized_words:
+            # Limit to reasonable number to avoid prompt bloat
+            important_terms = list(capitalized_words)[:20]
+            if important_terms:
+                prompt_parts.append("Important terms: " + ", ".join(important_terms))
+    
+    return ". ".join(prompt_parts) if prompt_parts else ""
+
 #
 #   SETUP realtime connection
 #
@@ -132,7 +169,8 @@ async def setup_assistant_session(master_state, greet_user: str = None):
                         },
                         "noise_reduction": {"type":"far_field"},
                         "transcription": {
-                            "model": master_state.conman.get_config("AUDIO_TRANSCRIPTION_MODEL")
+                            "model": master_state.conman.get_config("AUDIO_TRANSCRIPTION_MODEL"),
+                            "prompt": build_transcription_prompt(master_state)
                             },
                         "turn_detection": {
                             "create_response": True,

@@ -361,6 +361,7 @@ async def report_conversation_to_supervisor(master_state):
         # call the supervisor
         retries = 3
         response = None
+        last_error = None
         while retries > 0:
             retries -= 1
             try:
@@ -372,11 +373,25 @@ async def report_conversation_to_supervisor(master_state):
                 )
                 break
             except Exception as e:
-                print(f"Error calling supervisor: {e}")
-
-            await asyncio.sleep(1)
+                last_error = e
+                print(f"Error calling supervisor (retries remaining: {retries}): {e}")
+                if retries > 0:
+                    await asyncio.sleep(1)
 
         if not response:
+            error_msg = f"Failed to call supervisor after all retries. Last error: {last_error}"
+            print(f"❌ {error_msg}")
+            master_state.add_log_for_next_summary(f"❌ Supervisor call failed: {last_error}")
+            # Still try to send notification if supervisor contact is configured
+            if supervisor_contact:
+                for supervisor in supervisor_contact:
+                    if supervisor and supervisor.get("email"):
+                        await chatty_send_email(
+                            master_state, 
+                            supervisor["email"], 
+                            "Chatty Friend Supervisor Error " + get_current_date_string(),
+                            f"Supervisor analysis failed after multiple attempts. Error: {last_error}\n\nConversation transcript was available but could not be analyzed."
+                        )
             return None
 
         def parse_response_tag(response, tag):
