@@ -408,7 +408,7 @@ async def mic_listener(manager: AsyncManager) -> None:
                         # we are asleep
                         continue
 
-                    # we are live... debounce voice activity
+                    # we are live... debounce voice activity for UI events only
                     if is_voice:
                         last_voice_activity_time = time.time()
                     elif last_voice_activity_time is not None:
@@ -417,8 +417,11 @@ async def mic_listener(manager: AsyncManager) -> None:
                         else:
                             last_voice_activity_time = None
 
+                    # Always send audio when live - let server VAD decide what's speech
+                    await manager.output_q.put(event)
+
+                    # Track speaking state for UI/interruption events only
                     if is_voice:
-                        await manager.output_q.put(event)
                         if not user_is_speaking:
                             user_is_speaking = True
                             print("🔄 USER_STARTED_SPEAKING")
