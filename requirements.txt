@@ -44,11 +44,11 @@ pydantic-core==2.33.2
 pydeck==0.9.1
 pyjwt==2.10.1
 pynput==1.8.1
-pyobjc-core==11.1
-pyobjc-framework-applicationservices==11.1
-pyobjc-framework-cocoa==11.1
-pyobjc-framework-coretext==11.1
-pyobjc-framework-quartz==11.1
+pyobjc-core==11.1; sys_platform == 'darwin'
+pyobjc-framework-applicationservices==11.1; sys_platform == 'darwin'
+pyobjc-framework-cocoa==11.1; sys_platform == 'darwin'
+pyobjc-framework-coretext==11.1; sys_platform == 'darwin'
+pyobjc-framework-quartz==11.1; sys_platform == 'darwin'
 python-dateutil==2.9.0.post0
 pytz==2025.2
 referencing==0.36.2
