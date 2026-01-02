@@ -825,7 +825,7 @@ else:  # we have wifi and authentication!
                 'speed': st.session_state.config_manager.get_percent_config_as_0_to_100_int('SPEED') or 60,
                 'volume': st.session_state.config_manager.get_percent_config_as_0_to_100_int('VOLUME') or 50,
                 'max_entries': st.session_state.config_manager.get_config('MAX_PROFILE_ENTRIES') or 100,
-                'wait_time': st.session_state.config_manager.get_config('SECONDS_TO_WAIT_FOR_MORE_VOICE') or 1.0,
+                'wait_time': float(st.session_state.config_manager.get_config('SECONDS_TO_WAIT_FOR_MORE_VOICE') or 1.0),
                 'eagerness': st.session_state.config_manager.get_config('ASSISTANT_EAGERNESS_TO_REPLY') or 50,
                 'sleep_time': st.session_state.config_manager.get_config('AUTO_GO_TO_SLEEP_TIME_SECONDS') or 1800
             }
