@@ -58,9 +58,9 @@ The most recent conversation between the user and the companion is provided here
 - escalation: if the user shares concering information that should be escalated to one of the authorized contacts, provide a summary of the escalation here and mention the severity in ALL CAPS from the following list: NONE (no escalation), ROUTINE (escalation will be included in in a periodic summary report), IMPORTANT (escalation will be emailed immediately), URGENT (escalation will be texted to primary escalation contact immediately), CRITICAL (escalaton will be texted to all contacts immediately).
 
 {% if prior_pre_escalation_notes %}
-- pre_escalation_notes: add any NEW pre-escalation notes but don't repeat any that were alread noted in <prior_pre_escalation_notes>.  Just say NONE if there are no new pre-escalation notes.
+- pre_escalation_notes: if the conversation does not merit escalation now but appears to include new infromation (not already noted in <prior_pre_escalation_notes>) that may require escalation in the future, include NEW notes here so they can be taken into account. Just say NONE if there are no new pre-escalation.
 {% else %}
-- pre_escalation_notes: if the conversation does not merit escalation now but appears to include precursors that will require escalation in the future, include notes here so they can be taken into account when future conversations are reviewed.  Just say NONE if there are no new pre-escalation notes.
+- pre_escalation_notes: if the conversation does not merit escalation now but appears to include precursors that may require escalation in the future, include notes here so they can be taken into account when future conversations are reviewed.  Just say NONE if there are no new pre-escalation notes for future consideration.
 {% endif %}
 
 {% endif %}

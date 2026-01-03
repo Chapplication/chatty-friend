@@ -456,22 +456,34 @@ class SupabaseManager:
             # 1. Record usage activity
             self._record_activity(usage_stats)
             
-            # 2. Update last_seen and current_version
+            # 2. Get current device state including target_version
             from chatty_config import CHATTY_FRIEND_VERSION_NUMBER
-            self.client.table("devices").update({
-                "last_seen": datetime.utcnow().isoformat(),
-                "current_version": CHATTY_FRIEND_VERSION_NUMBER
-            }).eq("id", self.device_id).execute()
-            
-            # 3. Check for config updates
             response = self.client.table("devices").select(
-                "config_data, secrets_encrypted, config_pending, upgrade_pending"
+                "config_data, secrets_encrypted, config_pending, upgrade_pending, target_version"
             ).eq("id", self.device_id).execute()
             
             if not response.data or len(response.data) == 0:
+                # Device not found, just update basics
+                self.client.table("devices").update({
+                    "last_seen": datetime.utcnow().isoformat(),
+                    "current_version": CHATTY_FRIEND_VERSION_NUMBER
+                }).eq("id", self.device_id).execute()
                 return True, None, None
             
             device = response.data[0]
+            target_version = device.get("target_version")
+            
+            # 3. Update last_seen and current_version
+            # Only clear upgrade_pending if upgrade is complete (no target set, or we've reached target)
+            # This allows the upgrade to trigger first, then clears after restart with new code
+            update_data = {
+                "last_seen": datetime.utcnow().isoformat(),
+                "current_version": CHATTY_FRIEND_VERSION_NUMBER,
+            }
+            if not target_version or target_version == CHATTY_FRIEND_VERSION_NUMBER:
+                update_data["upgrade_pending"] = False
+            
+            self.client.table("devices").update(update_data).eq("id", self.device_id).execute()
             
             new_config = None
             new_secrets = None
