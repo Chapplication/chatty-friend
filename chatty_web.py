@@ -646,7 +646,9 @@ else:  # we have wifi and authentication!
                     'WAKE_WORD_THRESHOLD': st.session_state.get('wake_word_threshold', 0.49),
                     'SECONDS_TO_WAIT_FOR_MORE_VOICE': st.session_state.get('voice_wait_time', 1.0),
                     'WAKE_TRIGGER_LEVEL': st.session_state.get('wake_trigger_level', 1),
-                    'VAD_TRIGGER_LOOKBACK': st.session_state.get('vad_trigger_lookback', 3),
+                    'VAD_TRIGGER_LOOKBACK': st.session_state.get('vad_trigger_lookback', 1),
+                    'WAKE_PEAK_OFFSET': st.session_state.get('wake_peak_offset', 0.05),
+                    'WAKE_AVG_OFFSET': st.session_state.get('wake_avg_offset', 0.25),
                     'WAKE_WORD_RMS_THRESHOLD': st.session_state.get('wake_word_rms_threshold', 1100.0),
                     'NOISE_GATE_THRESHOLD': noise_gate if noise_gate > 0 else None
                 })
@@ -1603,9 +1605,27 @@ else:  # we have wifi and authentication!
         vad_trigger_lookback = st.number_input(
             "VAD Trigger Lookback",
             min_value=0, max_value=25, step=1,
-            value=int(st.session_state.config_manager.get_config('VAD_TRIGGER_LOOKBACK') or 3),
-            help="Number of recent frames to check for voice activity (higher = requires more sustained voice)",
+            value=int(st.session_state.config_manager.get_config('VAD_TRIGGER_LOOKBACK') or 1),
+            help="Number of recent frames to check for voice activity before wake word (0 = disabled, higher = requires more sustained voice)",
             key="vad_trigger_lookback"
+        )
+        
+        # Wake Peak Offset
+        wake_peak_offset = st.number_input(
+            "Wake Peak Offset",
+            min_value=0.0, max_value=0.5, step=0.01,
+            value=float(st.session_state.config_manager.get_config('WAKE_PEAK_OFFSET') or 0.05),
+            help="Added to wake threshold for peak requirement (lower = easier to trigger). Peak must reach threshold + this value.",
+            key="wake_peak_offset"
+        )
+        
+        # Wake Average Offset
+        wake_avg_offset = st.number_input(
+            "Wake Average Offset",
+            min_value=0.0, max_value=0.5, step=0.01,
+            value=float(st.session_state.config_manager.get_config('WAKE_AVG_OFFSET') or 0.25),
+            help="Subtracted from wake threshold for average requirement (higher = more tolerant of score dips). Average must be at least threshold - this value.",
+            key="wake_avg_offset"
         )
         
         # RMS Threshold
@@ -1637,6 +1657,8 @@ else:  # we have wifi and authentication!
                 'SECONDS_TO_WAIT_FOR_MORE_VOICE': voice_wait_time,
                 'WAKE_TRIGGER_LEVEL': wake_trigger_level,
                 'VAD_TRIGGER_LOOKBACK': vad_trigger_lookback,
+                'WAKE_PEAK_OFFSET': wake_peak_offset,
+                'WAKE_AVG_OFFSET': wake_avg_offset,
                 'WAKE_WORD_RMS_THRESHOLD': wake_word_rms_threshold,
                 'NOISE_GATE_THRESHOLD': noise_gate_threshold if noise_gate_threshold > 0 else None
             })
