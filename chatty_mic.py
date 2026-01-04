@@ -178,12 +178,23 @@ class WakeWordDetector:
 
         wake_threshold = self.master_state.conman.get_config("WAKE_WORD_THRESHOLD")
 
-        # Require `trigger_level` consecutive frames above threshold
+        # Peak + Average hybrid: require strong peak AND decent average
         recent_scores = list(self.score_history)[-self.trigger_level:]
-        has_sustained_high_scores = (
-            len(recent_scores) == self.trigger_level
-            and all(s >= wake_threshold for s in recent_scores)
-        )
+        peak_offset = self.master_state.conman.get_config("WAKE_PEAK_OFFSET") or 0.1
+        avg_offset = self.master_state.conman.get_config("WAKE_AVG_OFFSET") or 0.1
+        peak_threshold = wake_threshold + peak_offset
+        avg_threshold = wake_threshold - avg_offset
+        
+        if len(recent_scores) == self.trigger_level:
+            window_max_score = max(recent_scores)
+            avg_score = sum(recent_scores) / len(recent_scores)
+            has_sustained_high_scores = (
+                window_max_score >= peak_threshold and avg_score >= avg_threshold
+            )
+        else:
+            window_max_score = max_score
+            avg_score = max_score
+            has_sustained_high_scores = False
 
         # --- VAD gating for acceptance
 
@@ -215,7 +226,7 @@ class WakeWordDetector:
                 self.last_near_activation_log_time = now
                 reason = []
                 if not has_sustained_high_scores:
-                    reason.append(f"scores not sustained (need {self.trigger_level} frames >= {wake_threshold})")
+                    reason.append(f"peak/avg check failed (peak={window_max_score:.2f} need>={peak_threshold:.2f}, avg={avg_score:.2f} need>={avg_threshold:.2f})")
                 if not has_recent_voice:
                     reason.append(f"no recent VAD (lookback={self.vad_trigger_lookback})")
                 self.master_state.add_log_for_next_summary(

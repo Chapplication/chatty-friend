@@ -242,6 +242,8 @@ default_config = {
     "WAKE_WORD_MODEL_CHOICES" : ["amanda", "oliver"],
     "VAD_THRESHOLD" : 0.3,
     "WAKE_WORD_THRESHOLD" : 0.55,
+    "WAKE_PEAK_OFFSET": 0.1,   # Peak must be threshold + this
+    "WAKE_AVG_OFFSET": 0.1,    # Average must be threshold - this
     "WAKE_WORD_RMS_THRESHOLD" : 1100.0,
     "WAKE_TRIGGER_LEVEL" : 1,
     "VAD_TRIGGER_LOOKBACK" : 3,
