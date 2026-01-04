@@ -13,6 +13,7 @@ import time
 from chatty_config import ASSISTANT_STOP_SPEAKING, MASTER_EXIT_EVENT, NATIVE_OAI_SAMPLE_RATE_HZ, CHUNK_DURATION_MS, SPEAKER_PLAY_TONE
 from chatty_config import chatty_songs, CHATTY_SONG_ERROR
 from chatty_dsp import chatty_tone
+from chatty_debug import trace
 
 def chatty_tone_buffer(event):
 
@@ -93,6 +94,7 @@ async def speaker_player(manager: AsyncManager) -> None:
     def stop_speaker_stream(speaker_stream):
         if speaker_stream:
             print("🔈 Stopping speaker stream")
+            trace("spkr", "stream stopped")
             speaker_stream.stop_stream()
             speaker_stream.close()
         return None
@@ -115,6 +117,7 @@ async def speaker_player(manager: AsyncManager) -> None:
 
             # Start the stream
             speaker_stream.start_stream()
+            trace("spkr", "stream started")
 
         return speaker_stream
 
@@ -124,12 +127,16 @@ async def speaker_player(manager: AsyncManager) -> None:
             for event_type, event in events:
                 if event_type == "command":
                     if event == MASTER_EXIT_EVENT:
+                        trace("spkr", "received exit command")
                         should_exit = True
                         break
                     elif event.startswith(SPEAKER_PLAY_TONE):
+                        tone_name = event.split(":", 1)[1] if ":" in event else "unknown"
+                        trace("spkr", f"playing tone: {tone_name}")
                         manager.output_q.put_nowait(chatty_tone_buffer(event))
                         speaker_stream = prepare_to_speak(speaker_stream)
                     elif event == ASSISTANT_STOP_SPEAKING:
+                        trace("spkr", "interrupted by user - clearing queue")
                         last_cancel_time = time.time()
                         speaker_stream = stop_speaker_stream(speaker_stream)
                         # clear the output queue

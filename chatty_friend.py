@@ -8,6 +8,7 @@ from chatty_speaker import speaker_player
 from chatty_state import ChattyMasterState
 from chatty_realtime_messages import *
 from chatty_wifi import is_online, what_is_my_ip
+from chatty_debug import start_debug_server, stop_debug_server, trace
 
 from chatty_config import USER_SAID_WAKE_WORD, USER_STARTED_SPEAKING, ASSISTANT_STOP_SPEAKING, MASTER_EXIT_EVENT, ASSISTANT_RESUME_AFTER_AUTO_SUMMARY
 from chatty_config import SPEAKER_PLAY_TONE, CHATTY_SONG_STARTUP, CHATTY_SONG_AWAKE
@@ -124,6 +125,12 @@ async def assistant_go_live():
         traceback.print_exc()
         await do_early_exit("No OpenAI API key found.  Connect to " + where_to_connect + " and enter your API key.")
 
+    # Start debug log server for troubleshooting (if enabled)
+    if master_state.conman.get_config("DEBUG_SERVER_ENABLED"):
+        debug_port = master_state.conman.get_config("DEBUG_SERVER_PORT") or 9999
+        await start_debug_server(port=debug_port)
+        trace("main", "chatty_friend starting")
+
     welcome_message = "Chatty Friend is named " + master_state.conman.get_config("WAKE_WORD_MODEL")
     welcome_message += ".  Connect to the wifi network " + master_state.conman.get_config("WIFI_SSID") + " and browse to " + where_to_connect + " to configure."
 
@@ -144,6 +151,7 @@ async def assistant_go_live():
 
         # on mac, push to talk keyboard is used to start and stop the mic
         print("🎙️ Chatty Friend is ready")
+        trace("main", "ready - waiting for wake word")
         if master_state.system_type=="mac":
             from chatty_keyboard import listen_for_push_to_talk
             managers["keyboard"] = AsyncManager("keyboard", listen_for_push_to_talk)
@@ -155,9 +163,11 @@ async def assistant_go_live():
 
         if is_automated_restart_after_summary:
             if master_state.auto_summary_count < master_state.auto_summary_auto_resume_limit:
+                trace("main", "resuming after auto-summary")
                 await master_state.add_to_transcript("system", await setup_assistant_session(master_state, SUMMARY_INSTRUCTIONS))
                 managers["mic"].command_q.put_nowait(ASSISTANT_RESUME_AFTER_AUTO_SUMMARY)
             else:
+                trace("main", "auto-summary limit reached - waiting for wake word")
                 print("⏸️ Auto-summary limit reached; waiting for wake word to resume")
         elif just_rebooted:
             await managers["speaker"].command_q.put(SPEAKER_PLAY_TONE+":"+CHATTY_SONG_STARTUP)
@@ -174,12 +184,13 @@ async def assistant_go_live():
                     elif source in ["mic","keyboard"]:
                         if result == USER_SAID_WAKE_WORD:
                             print("🔄 USER_SAID_WAKE_WORD received from MIC")
+                            trace("main", "wake word received - starting session")
                             master_state.auto_summary_count = 0  # reset auto-resume budget on explicit wake
                             await master_state.add_to_transcript("system", await setup_assistant_session(master_state, WAKE_UP_INSTRUCTIONS))
                             await managers["speaker"].command_q.put(SPEAKER_PLAY_TONE+":"+CHATTY_SONG_AWAKE)
                         elif result == USER_STARTED_SPEAKING:
                             # within a session, user started speaking.stop audio that's already queued up
-
+                            trace("main", "user started speaking")
                             await assistant_session_cancel_audio(master_state)
                             # clear audio that's already downloaded but not played
                             await managers["speaker"].command_q.put(ASSISTANT_STOP_SPEAKING)
@@ -198,9 +209,11 @@ async def assistant_go_live():
 
         # summary triggered - tell the top of the loop
         if master_state.should_summarize:
+            trace("main", "auto-summarize triggered")
             master_state.should_summarize = False
             is_automated_restart_after_summary = True
         else:
+            trace("main", "going to sleep")
             is_automated_restart_after_summary = False
 
         master_state.should_reset_session = False
@@ -251,6 +264,10 @@ async def assistant_go_live():
         master_state.add_log_for_next_summary("X exception outer loop "+str(e))
         import traceback
         traceback.print_exc()
+
+    # Stop debug server on exit
+    trace("main", "shutting down")
+    await stop_debug_server()
 
 
 async def main():

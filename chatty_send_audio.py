@@ -6,6 +6,7 @@ from chatty_async_manager import AsyncManager
 from chatty_dsp import upsample_audio_efficient, apply_simple_noise_gate
 import numpy as np
 from chatty_config import MASTER_EXIT_EVENT, CHUNK_DURATION_MS
+from chatty_debug import trace
 
 from chatty_realtime_messages import send_audio_to_assistant
 #
@@ -17,6 +18,7 @@ async def stream_to_assistant(manager: AsyncManager):
     should_exit = False
 
     have_not_sent_audio = True
+    chunk_count = 0  # For rate-limited tracing
 
     initial_buffers = []
     while not should_exit:
@@ -46,6 +48,12 @@ async def stream_to_assistant(manager: AsyncManager):
 
                         if upsampled_buffer:
                             await send_audio_to_assistant(manager.master_state.ws, upsampled_buffer)
+                            chunk_count += 1
+                            # Rate-limited tracing: log first chunk and every 50th chunk
+                            if chunk_count == 1:
+                                trace("audio_out", f"first audio buffer sent ({len(upsampled_buffer)}B)")
+                            elif chunk_count % 50 == 0:
+                                trace("audio_out", f"streaming chunk #{chunk_count} ({len(upsampled_buffer)}B)")
 
                 elif event_type == "command":
                     if event == MASTER_EXIT_EVENT:

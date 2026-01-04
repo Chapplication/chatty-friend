@@ -7,6 +7,7 @@ import numpy as np
 from chatty_async_manager import AsyncManager
 import pyaudio
 from chatty_config import USER_SAID_WAKE_WORD, USER_STARTED_SPEAKING, ASSISTANT_GO_TO_SLEEP, MASTER_EXIT_EVENT, SAMPLE_RATE_HZ, AUDIO_BLOCKSIZE, PUSH_TO_TALK_START, PUSH_TO_TALK_STOP, ASSISTANT_RESUME_AFTER_AUTO_SUMMARY
+from chatty_debug import trace
 
 try:
     from openwakeword.model import Model as OpenWakewordModel
@@ -75,13 +76,16 @@ class WakeWordDetector:
             if oww:
                 print("✅ OpenWakeWord model loaded")
                 self.master_state.add_log_for_next_summary(f"✅ Wake word model loaded: {wake_word_file}")
+                trace("wake", f"model loaded: {wake_word_file}")
                 self.model = oww
             else:
                 print("❌ Failed to load OpenWakeWord model")
                 self.master_state.add_log_for_next_summary("❌ Wake word model failed to load; mic will fall back to always-on")
+                trace("wake", "model failed to load - falling back to always-on")
                 self.model = None
         else:
             self.master_state.add_log_for_next_summary("❌ OpenWakeWord not available; mic will fall back to always-on")
+            trace("wake", "OpenWakeWord not available")
 
         self.last_wake_word_detected = None
         # Use monotonic time for better reliability in debounce checks
@@ -218,6 +222,7 @@ class WakeWordDetector:
                     f"👂 Near-activation: wake_score={max_score:.2f} (thresh={wake_threshold}), "
                     f"RMS={rms:.0f}, VAD={is_voice}, reason: {'; '.join(reason)}"
                 )
+                trace("wake", f"near-activation score={max_score:.2f} rms={rms:.0f} - {'; '.join(reason)}")
 
         if wake_candidate:
             # RMS-energy filter + debounce + safe error handling
@@ -263,6 +268,7 @@ class WakeWordDetector:
                         f"🎯 Wake word detected (smoothed): "
                         f"score={max_score:.2f}, RMS={rms_strength:.0f}"
                     )
+                    trace("wake", f"DETECTED - accepted score={max_score:.2f} rms={rms_strength:.0f}")
                     print("✅ Wake word accepted")
                     self.last_wake_word_detected = now
                     is_wake_word = True
@@ -271,11 +277,13 @@ class WakeWordDetector:
                     self.master_state.add_log_for_next_summary(f"⏱️ Wake word candidate rejected: {rms_strength:.0f} < {min_strength}, {debounce_ok}")
                     if not debounce_ok:
                         print("⏱️ Wake word candidate rejected: within debounce window")
+                        trace("wake", f"rejected: debounce (score={max_score:.2f})")
                     else:
                         print(
                             f"🔇 Wake word rejected: insufficient signal strength "
                             f"{rms_strength:.0f} < {min_strength}"
                         )
+                        trace("wake", f"rejected: low rms={rms_strength:.0f} < {min_strength}")
 
             except Exception as e:
                 msg = (
@@ -345,6 +353,7 @@ async def mic_listener(manager: AsyncManager) -> None:
 
     # Start the stream
     stream.start_stream()
+    trace("mic", "stream opened")
 
     try:
         while not should_exit:
@@ -360,12 +369,15 @@ async def mic_listener(manager: AsyncManager) -> None:
 
                 if event_type == "command":
                     if event == MASTER_EXIT_EVENT:
+                        trace("mic", "received exit command")
                         should_exit = True
                         break
                     if event == ASSISTANT_GO_TO_SLEEP:
                         # go to sleep
+                        trace("mic", "going to sleep - listening for wake word")
                         mic_is_live_to_assistant = False
                     elif event == ASSISTANT_RESUME_AFTER_AUTO_SUMMARY:
+                        trace("mic", "resuming after auto-summary")
                         mic_is_live_to_assistant = True
 
                 elif event_type == "input":
@@ -439,6 +451,6 @@ async def mic_listener(manager: AsyncManager) -> None:
 
     stream.stop_stream()
     stream.close()
-
+    trace("mic", "stream closed")
 
     print("🎤 Microphone MASTER_EXIT_EVENT.")

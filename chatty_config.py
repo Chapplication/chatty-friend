@@ -268,6 +268,8 @@ default_config = {
     "TIME_ZONE" : None,
     "SUPERVISOR_INSTRUCTIONS" : None,
     "LANGUAGE" : "English",
+    "DEBUG_SERVER_PORT" : 9999,
+    "DEBUG_SERVER_ENABLED" : True,
 }
 default_config["VOICE_CHOICES"] = voice_choices[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in voice_choices else voice_choices[list(voice_choices.keys())[0]]
 default_config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[default_config["REALTIME_MODEL"]] if default_config["REALTIME_MODEL"] in cost_sheet_per_million else cost_sheet_per_million[list(cost_sheet_per_million.keys())[0]]

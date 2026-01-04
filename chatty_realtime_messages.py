@@ -6,6 +6,7 @@ import websockets
 from chatty_dsp import b64
 from chatty_tools import dispatch_tool_call
 from chatty_config import NATIVE_OAI_SAMPLE_RATE_HZ, MAX_OUTPUT_TOKENS
+from chatty_debug import trace
 
 import time
 import asyncio
@@ -63,11 +64,6 @@ def build_transcription_prompt(master_state):
     if wake_word:
         prompt_parts.append(f"Assistant's name: {wake_word}")
     
-    # Extract language preference
-    language = master_state.conman.get_config("LANGUAGE")
-    if language:
-        prompt_parts.append(f"Expected language: {language}")
-    
     # Extract key terms from user profile
     user_profile = master_state.conman.get_config("USER_PROFILE") or []
     if user_profile:
@@ -92,6 +88,8 @@ async def setup_assistant_session(master_state, greet_user: str = None):
     url = master_state.conman.get_config("WS_URL") + master_state.conman.get_config("REALTIME_MODEL")
     headers = {"Authorization": f"Bearer {master_state.openai.api_key}"}
 
+    trace("ws", f"connecting to OpenAI ({master_state.conman.get_config('REALTIME_MODEL')})")
+
     ws = None
     for retries in range(10):
         try:
@@ -104,6 +102,7 @@ async def setup_assistant_session(master_state, greet_user: str = None):
             break
         except Exception as e:
             print(f"Error connecting to websocket: {e}")
+            trace("ws", f"connection failed (attempt {retries+1}): {e}")
             await asyncio.sleep(1)
 
     if not ws:
@@ -129,6 +128,7 @@ async def setup_assistant_session(master_state, greet_user: str = None):
         master_state.remote_assistant_state["session_id"] = session["session"]["id"]
 
         print("✅ session.created "+str(session["session"]["id"]))
+        trace("ws", f"session created id={session['session']['id']}")
 
         sp = master_state.conman.get_config("VOICE_ASSISTANT_SYSTEM_PROMPT")
         if not sp:
@@ -212,6 +212,7 @@ async def setup_assistant_session(master_state, greet_user: str = None):
             response = await wait_for_remote_ack(ws, "session.updated")
 
             print("✅ session.updated")
+            trace("ws", "session updated - ready for audio")
 
             master_state.ws = ws
 
@@ -334,7 +335,9 @@ async def on_transcript_event(event, master_state):
 
 async def on_assistant_error(event, master_state):
     """ diagnostic... look at errors """
-    print(f"❌ Error: {event.get('error', {}).get('message', 'Unknown error')}")
+    error_msg = event.get('error', {}).get('message', 'Unknown error')
+    print(f"❌ Error: {error_msg}")
+    trace("ws", f"error: {error_msg}")
 
 async def on_assistant_audio(event, master_state):
     """ stream audio to speaker and track the item id for cancellations """
@@ -346,10 +349,12 @@ async def on_assistant_audio(event, master_state):
             master_state.remote_assistant_state["streaming_audio_item_ids"] = []
         if event["item_id"] not in master_state.remote_assistant_state["streaming_audio_item_ids"]:
             master_state.remote_assistant_state["streaming_audio_item_ids"].append(event["item_id"])
+            trace("ws", f"audio stream started item={event['item_id'][:8]}...")
         await master_state.task_managers["speaker"].input_q.put(event["delta"])
     elif "streaming_audio_item_ids" in master_state.remote_assistant_state:
         if event["item_id"] in master_state.remote_assistant_state["streaming_audio_item_ids"]:
             master_state.remote_assistant_state["streaming_audio_item_ids"].remove(event["item_id"])
+            trace("ws", f"audio stream ended item={event['item_id'][:8]}...")
 
 async def on_function_call_arguments_done(event, master_state):
     """ receive and dispatch tool calls """
@@ -372,10 +377,14 @@ async def on_function_call_arguments_done(event, master_state):
 
     try:
         call_id = event.get("call_id", "")
+        func_name = event.get("name", "unknown")
+        trace("tool", f"calling {func_name}")
         await send_function_call_result(await dispatch_tool_call(event, master_state), call_id)
+        trace("tool", f"completed {func_name}")
             
     except Exception as e:
         print(f"❌ Error handling function call: {e}")
+        trace("tool", f"error in {func_name}: {e}")
         await send_function_call_result(f"Error: {str(e)}", call_id)
 
 assistant_event_handlers = {
