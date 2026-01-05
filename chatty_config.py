@@ -246,7 +246,7 @@ default_config = {
     "WAKE_AVG_OFFSET": 0.25,   # Average must be threshold - this (0.30 with default threshold)
     "WAKE_WORD_RMS_THRESHOLD" : 1100.0,
     "WAKE_TRIGGER_LEVEL" : 1,
-    "VAD_TRIGGER_LOOKBACK" : 1,
+    "VAD_TRIGGER_LOOKBACK" : 10,  # 10 frames = 800ms - check for voice anywhere during wake word
     "SECONDS_TO_WAIT_FOR_MORE_VOICE" : 1.0,
     "CONFIG_PASSWORD" : "assistant",
     "CONFIG_PASSWORD_HINT": "assistant",

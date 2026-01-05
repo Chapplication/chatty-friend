@@ -646,7 +646,7 @@ else:  # we have wifi and authentication!
                     'WAKE_WORD_THRESHOLD': st.session_state.get('wake_word_threshold', 0.49),
                     'SECONDS_TO_WAIT_FOR_MORE_VOICE': st.session_state.get('voice_wait_time', 1.0),
                     'WAKE_TRIGGER_LEVEL': st.session_state.get('wake_trigger_level', 1),
-                    'VAD_TRIGGER_LOOKBACK': st.session_state.get('vad_trigger_lookback', 1),
+                    'VAD_TRIGGER_LOOKBACK': st.session_state.get('vad_trigger_lookback', 10),
                     'WAKE_PEAK_OFFSET': st.session_state.get('wake_peak_offset', 0.05),
                     'WAKE_AVG_OFFSET': st.session_state.get('wake_avg_offset', 0.25),
                     'WAKE_WORD_RMS_THRESHOLD': st.session_state.get('wake_word_rms_threshold', 1100.0),
@@ -1605,8 +1605,8 @@ else:  # we have wifi and authentication!
         vad_trigger_lookback = st.number_input(
             "VAD Trigger Lookback",
             min_value=0, max_value=25, step=1,
-            value=int(st.session_state.config_manager.get_config('VAD_TRIGGER_LOOKBACK') or 1),
-            help="Number of recent frames to check for voice activity before wake word (0 = disabled, higher = requires more sustained voice)",
+            value=int(st.session_state.config_manager.get_config('VAD_TRIGGER_LOOKBACK') or 10),
+            help="Number of recent frames to check for ANY voice activity (10 = 800ms window). Requires voice detected in at least one frame.",
             key="vad_trigger_lookback"
         )
         

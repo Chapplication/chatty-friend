@@ -91,6 +91,34 @@ class WakeWordDetector:
         # Use monotonic time for better reliability in debounce checks
         self._monotonic_time = time.monotonic if hasattr(time, 'monotonic') else time.time
 
+        # Periodic heartbeat logging for debugging (every 5 seconds)
+        self.heartbeat_interval = 5.0
+        self.last_heartbeat_time = 0
+        self.frames_since_heartbeat = 0
+        self.max_score_since_heartbeat = 0.0
+        self.max_vad_since_heartbeat = 0.0
+        self.max_rms_since_heartbeat = 0.0
+
+        # Log config values at startup
+        self._log_startup_config()
+
+    def _log_startup_config(self):
+        """Log all wake word detection config values at startup."""
+        cfg = self.master_state.conman
+        config_info = (
+            f"Wake detector config: "
+            f"vad_thresh={cfg.get_config('VAD_THRESHOLD')}, "
+            f"wake_thresh={cfg.get_config('WAKE_WORD_THRESHOLD')}, "
+            f"peak_offset={cfg.get_config('WAKE_PEAK_OFFSET')}, "
+            f"avg_offset={cfg.get_config('WAKE_AVG_OFFSET')}, "
+            f"rms_thresh={cfg.get_config('WAKE_WORD_RMS_THRESHOLD')}, "
+            f"trigger_level={self.trigger_level}, "
+            f"vad_lookback={self.vad_trigger_lookback}"
+        )
+        print(config_info)
+        trace("wake", config_info)
+        self.master_state.add_log_for_next_summary(f"🎤 {config_info}")
+
     def calculate_signal_strength(self, audio_samples: np.ndarray) -> float:
         """Calculate RMS (Root Mean Square) amplitude of audio signal."""
         return np.sqrt(np.mean(audio_samples.astype(np.float64) ** 2))
@@ -164,6 +192,14 @@ class WakeWordDetector:
         rms = self.calculate_signal_strength(audio_16ints)
 
         now = time.time()
+
+        # Track stats for heartbeat
+        self.frames_since_heartbeat += 1
+        if vad_score > self.max_vad_since_heartbeat:
+            self.max_vad_since_heartbeat = vad_score
+        if rms > self.max_rms_since_heartbeat:
+            self.max_rms_since_heartbeat = rms
+
         # return now if we're just filtering for voice (vs. listening for wakeword)
         if vad_only:
             return (is_voice, False)
@@ -208,17 +244,37 @@ class WakeWordDetector:
 
         is_wake_word = False
 
+        # Track max wake score for heartbeat
+        if max_score > self.max_score_since_heartbeat:
+            self.max_score_since_heartbeat = max_score
+
+        # Periodic heartbeat logging - shows we're alive even when nothing is happening
+        if (now - self.last_heartbeat_time) >= self.heartbeat_interval:
+            trace("wake", 
+                f"heartbeat: frames={self.frames_since_heartbeat}, "
+                f"max_score={self.max_score_since_heartbeat:.3f}, "
+                f"max_vad={self.max_vad_since_heartbeat:.3f}, "
+                f"max_rms={self.max_rms_since_heartbeat:.0f}, "
+                f"thresh={wake_threshold}"
+            )
+            # Reset heartbeat stats
+            self.last_heartbeat_time = now
+            self.frames_since_heartbeat = 0
+            self.max_score_since_heartbeat = 0.0
+            self.max_vad_since_heartbeat = 0.0
+            self.max_rms_since_heartbeat = 0.0
+
         # Log near-activation events (rate-limited): scores approaching threshold
         # This helps debug cases where someone's voice almost triggers wake word
         near_threshold = wake_threshold * 0.6  # 60% of threshold = "near" activation
 
-        # Only emit VAD/wake diagnostics while waiting for wake word and only if the wake score is promising
-        if max_score >= near_threshold and (now - self.last_vad_log_time) >= self.activity_log_interval:
-            self.last_vad_log_time = now
-
-            if False:
-                self.master_state.add_log_for_next_summary(
-                    f"🎙️ VAD activity: score={vad_score:.2f} (thresh={vad_threshold}), RMS={rms:.0f}, wake_score={max_score:.2f}"
+        # Log VAD activity when we have significant audio (rate-limited)
+        if (now - self.last_vad_log_time) >= self.activity_log_interval:
+            if max_score >= near_threshold or is_voice:
+                self.last_vad_log_time = now
+                trace("wake", 
+                    f"activity: vad={vad_score:.3f}/{vad_threshold}, voice={is_voice}, "
+                    f"wake={max_score:.3f}/{wake_threshold}, rms={rms:.0f}"
                 )
 
         if max_score >= near_threshold and not wake_candidate:
@@ -237,6 +293,10 @@ class WakeWordDetector:
 
         if wake_candidate:
             # RMS-energy filter + debounce + safe error handling
+            trace("wake", 
+                f"CANDIDATE: score={max_score:.3f}, peak={window_max_score:.3f}>={peak_threshold:.3f}, "
+                f"avg={avg_score:.3f}>={avg_threshold:.3f}, vad={is_voice}"
+            )
             try:
                 raw_audio_history = np.array(
                     list(self.model.preprocessor.raw_data_buffer)
