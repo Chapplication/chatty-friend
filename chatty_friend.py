@@ -149,15 +149,8 @@ async def assistant_go_live():
         managers["assistant"] = AsyncManager("assistant", stream_to_assistant, managers["mic"].output_q,     )
         managers["speaker"]   = AsyncManager("speaker",   speaker_player,      managers["assistant"].output_q)
 
-        # on mac, push to talk keyboard is used to start and stop the mic
         print("🎙️ Chatty Friend is ready")
         trace("main", "ready - waiting for wake word")
-        if master_state.system_type=="mac":
-            from chatty_keyboard import listen_for_push_to_talk
-            managers["keyboard"] = AsyncManager("keyboard", listen_for_push_to_talk)
-            if not is_automated_restart_after_summary:
-                print("💬 Press W to wake up")
-            print("💬 hold SPACE to capture microphone")
 
         await master_state.start_tasks(managers)
 

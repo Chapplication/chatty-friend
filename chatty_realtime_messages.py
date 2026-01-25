@@ -16,8 +16,6 @@ import pprint
 #  OUTGOING MESSAGES TO ASSISTANT
 #
 async def send_to_assistant(ws, message):
-
-
     if ws:
         try:
             await ws.send(json.dumps(message))
@@ -180,7 +178,7 @@ async def setup_assistant_session(master_state, greet_user: str = None):
                         "turn_detection": {
                             "create_response": True,
                             #"eagerness": "high" if etr_ms <= 200 else "auto" if etr_ms <= 800 else "low",
-                            "interrupt_response": False, # assume we are doing VAD locally on the pi; mac is push to talk
+                            "interrupt_response": True, # allow user to interrupt assistant's response
                             "prefix_padding_ms": 300,
                             "silence_duration_ms": etr_ms,
                             "threshold": 0.5,
@@ -335,7 +333,14 @@ async def on_transcript_event(event, master_state):
 
 async def on_assistant_error(event, master_state):
     """ diagnostic... look at errors """
+    error_code = event.get('error', {}).get('code', '')
     error_msg = event.get('error', {}).get('message', 'Unknown error')
+    
+    # Suppress expected/harmless errors
+    if error_code in ['response_cancel_not_active', 'conversation_already_has_active_response']:
+        # These happen during normal interruption flow - not a problem
+        return
+    
     print(f"❌ Error: {error_msg}")
     trace("ws", f"error: {error_msg}")
 
@@ -387,6 +392,17 @@ async def on_function_call_arguments_done(event, master_state):
         trace("tool", f"error in {func_name}: {e}")
         await send_function_call_result(f"Error: {str(e)}", call_id)
 
+async def on_speech_started(event, master_state):
+    """Handle server VAD detecting user speech - stop speaker to allow interruption."""
+    from chatty_config import ASSISTANT_STOP_SPEAKING
+    
+    # Cancel any in-progress audio on the server side
+    await assistant_session_cancel_audio(master_state)
+    
+    # Stop the local speaker from playing buffered audio
+    if "speaker" in master_state.task_managers:
+        await master_state.task_managers["speaker"].command_q.put(ASSISTANT_STOP_SPEAKING)
+
 assistant_event_handlers = {
     "response.output_audio.delta": on_assistant_audio,
     "response.output_audio.done": on_assistant_audio,
@@ -395,6 +411,7 @@ assistant_event_handlers = {
     "conversation.item.input_audio_transcription.completed": on_transcript_event,
     "response.output_audio_transcript.done": on_transcript_event,
     "response.function_call_arguments.done": on_function_call_arguments_done,
+    "input_audio_buffer.speech_started": on_speech_started,
 }
 
 async def on_assistant_input_event(event_raw, master_state):

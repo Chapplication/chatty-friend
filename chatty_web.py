@@ -642,14 +642,13 @@ else:  # we have wifi and authentication!
             elif section_id == 'voice_tech':
                 noise_gate = st.session_state.get('noise_gate_threshold', 0.0)
                 config_updates.update({
-                    'VAD_THRESHOLD': st.session_state.get('vad_threshold', 0.21),
-                    'WAKE_WORD_THRESHOLD': st.session_state.get('wake_word_threshold', 0.49),
+                    'VAD_THRESHOLD': st.session_state.get('vad_threshold', 0.3),
                     'SECONDS_TO_WAIT_FOR_MORE_VOICE': st.session_state.get('voice_wait_time', 1.0),
-                    'WAKE_TRIGGER_LEVEL': st.session_state.get('wake_trigger_level', 1),
-                    'VAD_TRIGGER_LOOKBACK': st.session_state.get('vad_trigger_lookback', 10),
-                    'WAKE_PEAK_OFFSET': st.session_state.get('wake_peak_offset', 0.05),
-                    'WAKE_AVG_OFFSET': st.session_state.get('wake_avg_offset', 0.25),
-                    'WAKE_WORD_RMS_THRESHOLD': st.session_state.get('wake_word_rms_threshold', 1100.0),
+                    'WAKE_ENTRY_THRESHOLD': st.session_state.get('wake_entry_threshold', 0.35),
+                    'WAKE_CONFIRM_PEAK': st.session_state.get('wake_confirm_peak', 0.45),
+                    'WAKE_CONFIRM_CUMULATIVE': st.session_state.get('wake_confirm_cumulative', 1.2),
+                    'NOISE_TARGET_FLOOR': st.session_state.get('noise_target_floor', 120.0),
+                    'NOISE_MAX_INJECTION': st.session_state.get('noise_max_injection', 85.0),
                     'NOISE_GATE_THRESHOLD': noise_gate if noise_gate > 0 else None
                 })
             elif section_id == 'secrets':
@@ -1557,26 +1556,17 @@ else:  # we have wifi and authentication!
     
     elif current_section == 'voice_tech':  # Voice Tech Section
         st.markdown("<div class='config-section'>", unsafe_allow_html=True)
-        st.subheader("🔧 Voice Technology Settings")
+        st.subheader("Voice Technology Settings")
         
-        st.warning("⚠️ Don't edit these settings unless you know what you're doing!")
+        st.warning("Don't edit these settings unless you know what you're doing!")
         
         # Voice Activity Detection
         vad_threshold = st.number_input(
             "Voice Activity Detection Threshold",
             min_value=0.0, max_value=1.0, step=0.01,
-            value=float(st.session_state.config_manager.get_config('VAD_THRESHOLD') or 0.21),
-            help="Sensitivity for detecting when you start speaking",
+            value=float(st.session_state.config_manager.get_config('VAD_THRESHOLD') or 0.3),
+            help="Sensitivity for detecting when you start speaking (lower = more sensitive)",
             key="vad_threshold"
-        )
-        
-        # Wake Word Detection
-        wake_word_threshold = st.number_input(
-            "Wake Word Detection Threshold",
-            min_value=0.0, max_value=1.0, step=0.01,
-            value=float(st.session_state.config_manager.get_config('WAKE_WORD_THRESHOLD') or 0.49),
-            help="Sensitivity for detecting the wake word",
-            key="wake_word_threshold"
         )
         
         # Voice wait time
@@ -1589,83 +1579,86 @@ else:  # we have wifi and authentication!
         )
         
         st.markdown("---")
-        st.markdown("### Advanced Wake Word Tuning")
-        st.info("💡 These settings fine-tune wake word detection. Adjust if you experience false positives or missed wake words.")
+        st.markdown("### Wake Word Detection (Cluster-Based)")
+        st.info("These settings control how wake words are detected using cluster-based scoring. The system tracks scores over multiple frames and confirms detection via peak or cumulative thresholds.")
         
-        # Wake Trigger Level
-        wake_trigger_level = st.number_input(
-            "Wake Trigger Level",
-            min_value=1, max_value=10, step=1,
-            value=int(st.session_state.config_manager.get_config('WAKE_TRIGGER_LEVEL') or 1),
-            help="Number of consecutive frames above threshold required to trigger wake word (higher = fewer false positives, but may miss some wake words)",
-            key="wake_trigger_level"
+        # Wake Entry Threshold
+        wake_entry_threshold = st.number_input(
+            "Wake Entry Threshold",
+            min_value=0.1, max_value=0.6, step=0.01,
+            value=float(st.session_state.config_manager.get_config('WAKE_ENTRY_THRESHOLD') or 0.35),
+            help="Score threshold to start tracking a potential wake word. Lower = more sensitive but more false positives.",
+            key="wake_entry_threshold"
         )
         
-        # VAD Trigger Lookback
-        vad_trigger_lookback = st.number_input(
-            "VAD Trigger Lookback",
-            min_value=0, max_value=25, step=1,
-            value=int(st.session_state.config_manager.get_config('VAD_TRIGGER_LOOKBACK') or 10),
-            help="Number of recent frames to check for ANY voice activity (10 = 800ms window). Requires voice detected in at least one frame.",
-            key="vad_trigger_lookback"
+        # Wake Confirm Peak
+        wake_confirm_peak = st.number_input(
+            "Wake Confirm Peak",
+            min_value=0.2, max_value=0.8, step=0.01,
+            value=float(st.session_state.config_manager.get_config('WAKE_CONFIRM_PEAK') or 0.45),
+            help="Peak score required to confirm detection. If any frame reaches this, wake word is confirmed.",
+            key="wake_confirm_peak"
         )
         
-        # Wake Peak Offset
-        wake_peak_offset = st.number_input(
-            "Wake Peak Offset",
-            min_value=0.0, max_value=0.5, step=0.01,
-            value=float(st.session_state.config_manager.get_config('WAKE_PEAK_OFFSET') or 0.05),
-            help="Added to wake threshold for peak requirement (lower = easier to trigger). Peak must reach threshold + this value.",
-            key="wake_peak_offset"
+        # Wake Confirm Cumulative
+        wake_confirm_cumulative = st.number_input(
+            "Wake Confirm Cumulative",
+            min_value=0.5, max_value=3.0, step=0.1,
+            value=float(st.session_state.config_manager.get_config('WAKE_CONFIRM_CUMULATIVE') or 1.2),
+            help="Alternative: cumulative score threshold for detection. Catches sustained moderate scores that don't peak high.",
+            key="wake_confirm_cumulative"
         )
         
-        # Wake Average Offset
-        wake_avg_offset = st.number_input(
-            "Wake Average Offset",
-            min_value=0.0, max_value=0.5, step=0.01,
-            value=float(st.session_state.config_manager.get_config('WAKE_AVG_OFFSET') or 0.25),
-            help="Subtracted from wake threshold for average requirement (higher = more tolerant of score dips). Average must be at least threshold - this value.",
-            key="wake_avg_offset"
+        st.markdown("---")
+        st.markdown("### Auto-Noise Injection")
+        st.info("Auto-noise helps wake word detection in quiet rooms by injecting synthetic noise to reach a target floor. Real acoustic noise actually helps model recognition.")
+        
+        # Noise Target Floor
+        noise_target_floor = st.number_input(
+            "Noise Target Floor (RMS)",
+            min_value=50.0, max_value=200.0, step=10.0,
+            value=float(st.session_state.config_manager.get_config('NOISE_TARGET_FLOOR') or 120.0),
+            help="Target ambient noise floor. Auto-noise adds synthetic noise to reach this level in quiet environments.",
+            key="noise_target_floor"
         )
         
-        # RMS Threshold
-        wake_word_rms_threshold = st.number_input(
-            "Wake Word RMS Threshold",
-            min_value=0.0, max_value=10000.0, step=100.0,
-            value=float(st.session_state.config_manager.get_config('WAKE_WORD_RMS_THRESHOLD') or st.session_state.config_manager.default_config.get('WAKE_WORD_RMS_THRESHOLD', 1100.0)),
-            help="Minimum signal strength (RMS) required for wake word acceptance (higher = requires louder/more clear speech)",
-            key="wake_word_rms_threshold"
+        # Noise Max Injection
+        noise_max_injection = st.number_input(
+            "Noise Max Injection (RMS)",
+            min_value=0.0, max_value=150.0, step=5.0,
+            value=float(st.session_state.config_manager.get_config('NOISE_MAX_INJECTION') or 85.0),
+            help="Maximum synthetic noise to inject. Capped to avoid over-injection which can hurt recognition.",
+            key="noise_max_injection"
         )
         
         st.markdown("---")
         st.markdown("### Audio Processing")
-        st.info("💡 Audio processing settings to improve quality. Disabled by default for optimal Raspberry Pi performance.")
+        st.info("Additional audio processing settings. Disabled by default for optimal Raspberry Pi performance.")
         
         # Noise Gate Threshold
         noise_gate_threshold = st.number_input(
             "Noise Gate Threshold",
             min_value=0.0, max_value=5000.0, step=100.0,
             value=float(st.session_state.config_manager.get_config('NOISE_GATE_THRESHOLD') or 0.0) if st.session_state.config_manager.get_config('NOISE_GATE_THRESHOLD') is not None else 0.0,
-            help="Enable noise gate to reduce background noise. Set to 0 to disable (recommended for RPi). Higher values = more aggressive noise filtering. Typical range: 300-800. Only enable if experiencing significant background noise issues.",
+            help="Enable noise gate to reduce background noise. Set to 0 to disable (recommended for RPi). Higher values = more aggressive noise filtering.",
             key="noise_gate_threshold"
         )
         
-        if st.button("💾 Save Voice Tech Settings", type="primary", key="save_voice_tech"):
+        if st.button("Save Voice Tech Settings", type="primary", key="save_voice_tech"):
             success, message = st.session_state.config_manager.save_config({
                 'VAD_THRESHOLD': vad_threshold,
-                'WAKE_WORD_THRESHOLD': wake_word_threshold,
                 'SECONDS_TO_WAIT_FOR_MORE_VOICE': voice_wait_time,
-                'WAKE_TRIGGER_LEVEL': wake_trigger_level,
-                'VAD_TRIGGER_LOOKBACK': vad_trigger_lookback,
-                'WAKE_PEAK_OFFSET': wake_peak_offset,
-                'WAKE_AVG_OFFSET': wake_avg_offset,
-                'WAKE_WORD_RMS_THRESHOLD': wake_word_rms_threshold,
+                'WAKE_ENTRY_THRESHOLD': wake_entry_threshold,
+                'WAKE_CONFIRM_PEAK': wake_confirm_peak,
+                'WAKE_CONFIRM_CUMULATIVE': wake_confirm_cumulative,
+                'NOISE_TARGET_FLOOR': noise_target_floor,
+                'NOISE_MAX_INJECTION': noise_max_injection,
                 'NOISE_GATE_THRESHOLD': noise_gate_threshold if noise_gate_threshold > 0 else None
             })
             if success:
-                st.success("✅ Voice tech settings saved!")
+                st.success("Voice tech settings saved!")
             else:
-                st.error(f"❌ Error saving settings: {message}")
+                st.error(f"Error saving settings: {message}")
         
         st.markdown("</div>", unsafe_allow_html=True)
     

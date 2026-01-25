@@ -244,10 +244,14 @@ Configure content sources:
 - **News Provider** - Select from available news sources (BBC, CNN, NPR, etc.)
 
 ### 🔧 Voice Technical Config
-Advanced voice detection settings:
-- **Voice Activity Detection Threshold** - Sensitivity for detecting speech (0.2-0.5)
-- **Wake Word Detection Threshold** - Sensitivity for wake word recognition (0.4-0.9)
+Advanced voice detection settings using cluster-based wake word detection with auto-noise:
+- **Voice Activity Detection Threshold** - Sensitivity for detecting speech (0.0-1.0, default 0.3)
 - **Seconds to Wait for More Voice** - Pause duration before processing speech
+- **Wake Entry Threshold** - Score to start tracking potential wake word (0.1-0.6, default 0.35)
+- **Wake Confirm Peak** - Peak score to confirm detection (0.2-0.8, default 0.45)
+- **Wake Confirm Cumulative** - Cumulative score threshold for sustained moderate scores (0.5-3.0, default 1.2)
+- **Noise Target Floor** - Target ambient RMS level for auto-noise injection (50-200, default 120)
+- **Noise Max Injection** - Maximum synthetic noise amplitude (0-150, default 85)
 
 ### 🔐 Secrets
 Manage API keys and sensitive data:

@@ -241,13 +241,19 @@ default_config = {
     "WAKE_WORD_MODEL" : "amanda",
     "WAKE_WORD_MODEL_CHOICES" : ["amanda", "oliver"],
     "VAD_THRESHOLD" : 0.3,
-    "WAKE_WORD_THRESHOLD" : 0.55,
-    "WAKE_PEAK_OFFSET": 0.05,  # Peak must be threshold + this (0.60 with default threshold)
-    "WAKE_AVG_OFFSET": 0.25,   # Average must be threshold - this (0.30 with default threshold)
-    "WAKE_WORD_RMS_THRESHOLD" : 1100.0,
-    "WAKE_TRIGGER_LEVEL" : 1,
-    "VAD_TRIGGER_LOOKBACK" : 10,  # 10 frames = 800ms - check for voice anywhere during wake word
+    # Cluster-based wake word detection
+    "WAKE_ENTRY_THRESHOLD" : 0.35,        # Start tracking when score exceeds this
+    "WAKE_CONFIRM_PEAK" : 0.45,           # Confirm if peak reaches this
+    "WAKE_CONFIRM_CUMULATIVE" : 1.2,      # OR confirm if cumulative score exceeds this
+    "WAKE_MIN_FRAMES_ABOVE_ENTRY" : 2,    # Minimum frames above entry for cumulative
+    "WAKE_COOLDOWN_FRAMES" : 5,           # Frames to wait after detection (~400ms)
+    # Auto-noise injection
+    "NOISE_TARGET_FLOOR" : 120.0,         # Target ambient noise floor RMS
+    "NOISE_MAX_INJECTION" : 85.0,         # Maximum synthetic noise to inject
     "SECONDS_TO_WAIT_FOR_MORE_VOICE" : 1.0,
+    # Local VAD gating - only stream audio when voice is detected locally
+    "LOCAL_VAD_GATE" : True,              # Enable local VAD gating (saves bandwidth/cost)
+    "LOCAL_VAD_PREROLL_FRAMES" : 5,       # Frames to buffer before voice detected (~400ms)
     "CONFIG_PASSWORD" : "assistant",
     "CONFIG_PASSWORD_HINT": "assistant",
     "USER_PROFILE" : [profile_suggestions],
@@ -312,8 +318,6 @@ ASSISTANT_RESUME_AFTER_AUTO_SUMMARY = "ASSISTANT_RESUME_AFTER_AUTO_SUMMARY"
 ASSISTANT_STOP_SPEAKING = "ASSISTANT_STOP_SPEAKING"
 USER_STARTED_SPEAKING   = "USER_STARTED_SPEAKING"
 MASTER_EXIT_EVENT       = "MASTER_EXIT_EVENT"
-PUSH_TO_TALK_START      = "PUSH_TO_TALK_START"
-PUSH_TO_TALK_STOP       = "PUSH_TO_TALK_STOP"
 SPEAKER_PLAY_TONE       = "SPEAKER_PLAY_TONE"
 
 VECTOR_CACHE_PATH = "chatty_embeddings.bin"
@@ -426,27 +430,6 @@ class ConfigManager:
             # force sync up cost and voice choices based on the model selected
             self.config["VOICE_CHOICES"] = voice_choices[self.config["REALTIME_MODEL"]]
             self.config["TOKEN_COST_PER_MILLION"] = cost_sheet_per_million[self.config["REALTIME_MODEL"]]
-
-        # Validate wake word configuration parameters
-        if "WAKE_TRIGGER_LEVEL" in self.config:
-            try:
-                level = int(self.config["WAKE_TRIGGER_LEVEL"])
-                if level < 1 or level > 10:
-                    print(f"Warning: WAKE_TRIGGER_LEVEL {level} out of range [1-10], resetting to default")
-                    missing_keys.append("WAKE_TRIGGER_LEVEL")
-            except (ValueError, TypeError):
-                print(f"Warning: Invalid WAKE_TRIGGER_LEVEL, resetting to default")
-                missing_keys.append("WAKE_TRIGGER_LEVEL")
-
-        if "VAD_TRIGGER_LOOKBACK" in self.config:
-            try:
-                lookback = int(self.config["VAD_TRIGGER_LOOKBACK"])
-                if lookback < 0 or lookback > 25:
-                    print(f"Warning: VAD_TRIGGER_LOOKBACK {lookback} out of range [0-25], resetting to default")
-                    missing_keys.append("VAD_TRIGGER_LOOKBACK")
-            except (ValueError, TypeError):
-                print(f"Warning: Invalid VAD_TRIGGER_LOOKBACK, resetting to default")
-                missing_keys.append("VAD_TRIGGER_LOOKBACK")
 
         # version is in the config so the website can see it but force sync to the code here
         missing_keys.extend(["CHATTY_FRIEND_VERSION"])

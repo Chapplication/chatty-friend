@@ -6,7 +6,7 @@ import time
 import numpy as np
 from chatty_async_manager import AsyncManager
 import pyaudio
-from chatty_config import USER_SAID_WAKE_WORD, USER_STARTED_SPEAKING, ASSISTANT_GO_TO_SLEEP, MASTER_EXIT_EVENT, SAMPLE_RATE_HZ, AUDIO_BLOCKSIZE, PUSH_TO_TALK_START, PUSH_TO_TALK_STOP, ASSISTANT_RESUME_AFTER_AUTO_SUMMARY
+from chatty_config import USER_SAID_WAKE_WORD, USER_STARTED_SPEAKING, ASSISTANT_GO_TO_SLEEP, MASTER_EXIT_EVENT, SAMPLE_RATE_HZ, AUDIO_BLOCKSIZE, ASSISTANT_RESUME_AFTER_AUTO_SUMMARY
 from chatty_debug import trace
 
 try:
@@ -23,39 +23,130 @@ import time
 from collections import deque
 import numpy as np
 
+
+class AutoNoiseManager:
+    """
+    Adaptive noise injection optimized for wake word detection.
+    
+    Key insight from testing: Real acoustic noise performs better than synthetic
+    digital noise for model recognition, likely because training data contains
+    natural acoustic noise. Best results at ~30-40 RMS ambient with ~85 injection.
+    
+    Philosophy:
+    - Target a total noise floor of ~120 RMS
+    - BUT cap synthetic injection at ~85-90 to avoid over-injecting digital noise
+    - In quiet rooms: accept slightly lower floor rather than excessive synthetic noise
+    - In rooms with natural ambient noise: inject less (natural noise helps!)
+    """
+    
+    def __init__(self, target_floor=120.0, max_injection=85.0):
+        """
+        Args:
+            target_floor: Desired minimum total noise floor RMS.
+            max_injection: Maximum synthetic noise to inject. Capped because
+                          synthetic noise doesn't match training data as well
+                          as real acoustic noise. Default 85 based on testing
+                          showing optimal performance at this injection level.
+        """
+        self.target_floor = target_floor
+        self.max_injection = max_injection
+        
+        # Transient rejection: ignore "quiet" frames with RMS above this
+        # (catches door slams, music bursts with low VAD)
+        self.max_ambient_rms = target_floor * 2  # 240 by default
+        
+        # State - exponential moving average for smooth ambient tracking
+        self.ambient_ema = None
+        self.alpha = 0.08  # Smoothing factor (slightly faster adaptation)
+        self.frame_count = 0
+        self.warmup_frames = 25  # ~2 seconds
+        self.is_warmed_up = False
+        self.current_noise_level = 0
+    
+    def update(self, rms, vad_score):
+        """
+        Update with new frame, return noise level to inject.
+        
+        Key insight: Only track ambient during quiet periods (low VAD).
+        This prevents speech from corrupting our ambient estimate.
+        """
+        self.frame_count += 1
+        
+        # Only update ambient estimate during quiet periods
+        # AND reject transient loud sounds (low VAD but high RMS = door slam, etc.)
+        if vad_score < 0.15 and rms < self.max_ambient_rms:
+            if self.ambient_ema is None:
+                self.ambient_ema = rms
+            else:
+                self.ambient_ema = self.alpha * rms + (1 - self.alpha) * self.ambient_ema
+        
+        # Warmup period - gather initial ambient estimate
+        if not self.is_warmed_up:
+            if self.frame_count >= self.warmup_frames and self.ambient_ema is not None:
+                self.is_warmed_up = True
+            return 0  # No injection during warmup
+        
+        # Calculate injection: bring floor UP to target, but cap synthetic noise
+        # Key: don't over-inject synthetic noise in quiet rooms - it hurts performance
+        if self.ambient_ema is not None:
+            gap = self.target_floor - self.ambient_ema
+            # Cap at max_injection to avoid excessive synthetic noise
+            self.current_noise_level = min(max(0, gap), self.max_injection)
+        
+        return self.current_noise_level
+    
+    def get_stats(self):
+        """Return current statistics for display."""
+        return {
+            'noise_level': self.current_noise_level,
+            'ambient_rms': self.ambient_ema or 0,
+            'target_floor': self.target_floor,
+            'max_injection': self.max_injection,
+            'warmed_up': self.is_warmed_up,
+        }
+
+
 class WakeWordDetector:
-    """Wraps openwakeword model for wake word detection."""
+    """Wraps openwakeword model for wake word detection with cluster-based detection and auto-noise."""
     def __init__(self, master_state):
         self.model = None
-        self.wake_to_wake_min_time = 5.0
         self.master_state = master_state
+        cfg = master_state.conman
 
-        # Audio characteristics: 80ms frames at 16kHz → 1280 samples per call
+        # Audio characteristics: 80ms frames at 16kHz -> 1280 samples per call
         self.sample_rate = 16000
         self.frame_duration_sec = 0.08
         self.frame_samples = int(self.sample_rate * self.frame_duration_sec)  # 1280
 
-        # --- Temporal smoothing / history state
-        # 25 frames ≈ 25 * 80ms ≈ 2.0s of score history
-        self.score_history = deque(maxlen=25)
+        # --- VAD history for is_voice detection
         self.vad_history = deque(maxlen=25)
 
         # --- Activity logging state (rate-limited to once per second)
         self.activity_log_interval = 1.0  # seconds between activity logs
         self.last_vad_log_time = 0
-        self.last_near_activation_log_time = 0
 
-        # trigger_level=4 → ≈ 320ms of sustained high scores
-        cfg_trigger_level = master_state.conman.get_config("WAKE_TRIGGER_LEVEL")
-        self.trigger_level = int(cfg_trigger_level) if cfg_trigger_level is not None else 1
+        # --- Cluster-based detection state
+        self.tracking = False
+        self.tracking_scores = []
+        self.tracking_start_time = 0.0
+        self.cooldown_remaining = 0
 
-        # vad_trigger_lookback=10 → ≈ 800ms of "recent voice" required
-        cfg_vad_lookback = master_state.conman.get_config("VAD_TRIGGER_LOOKBACK")
-        self.vad_trigger_lookback = int(cfg_vad_lookback) if cfg_vad_lookback is not None else 3
+        # --- Detection thresholds from config
+        self.entry_threshold = cfg.get_config("WAKE_ENTRY_THRESHOLD") or 0.35
+        self.confirm_peak = cfg.get_config("WAKE_CONFIRM_PEAK") or 0.45
+        self.confirm_cumulative = cfg.get_config("WAKE_CONFIRM_CUMULATIVE") or 1.2
+        self.min_frames_above_entry = int(cfg.get_config("WAKE_MIN_FRAMES_ABOVE_ENTRY") or 2)
+        self.cooldown_frames = int(cfg.get_config("WAKE_COOLDOWN_FRAMES") or 5)
 
-        # RMS window: ~0.75s of audio for energy check
-        self.rms_window_samples = int(0.75 * self.sample_rate)  # 12000
+        # --- Auto-noise manager
+        noise_target = cfg.get_config("NOISE_TARGET_FLOOR") or 120.0
+        noise_max = cfg.get_config("NOISE_MAX_INJECTION") or 85.0
+        self.noise_manager = AutoNoiseManager(
+            target_floor=noise_target,
+            max_injection=noise_max
+        )
 
+        # --- Load wake word model
         base_assistant_name = master_state.conman.get_wake_word_model()
         if OpenWakewordModel and base_assistant_name:
             oww = None
@@ -65,26 +156,26 @@ class WakeWordDetector:
                     print("Trying to load OpenWakeWord model: " + wake_word_file)
                     oww = OpenWakewordModel(
                         wakeword_models=[wake_word_file],
-                        vad_threshold=master_state.conman.get_config("VAD_THRESHOLD"),
+                        vad_threshold=cfg.get_config("VAD_THRESHOLD"),
                         inference_framework=extension,
                     )
                     break
                 except Exception as e:
                     print(f"OpenWakeWord exception: {e}")
-                    self.master_state.add_log_for_next_summary(f"⚠️ OpenWakeWord exception loading {wake_word_file}: {e}")
+                    self.master_state.add_log_for_next_summary(f"OpenWakeWord exception loading {wake_word_file}: {e}")
                     pass
             if oww:
-                print("✅ OpenWakeWord model loaded")
-                self.master_state.add_log_for_next_summary(f"✅ Wake word model loaded: {wake_word_file}")
+                print("OpenWakeWord model loaded")
+                self.master_state.add_log_for_next_summary(f"Wake word model loaded: {wake_word_file}")
                 trace("wake", f"model loaded: {wake_word_file}")
                 self.model = oww
             else:
-                print("❌ Failed to load OpenWakeWord model")
-                self.master_state.add_log_for_next_summary("❌ Wake word model failed to load; mic will fall back to always-on")
+                print("Failed to load OpenWakeWord model")
+                self.master_state.add_log_for_next_summary("Wake word model failed to load; mic will fall back to always-on")
                 trace("wake", "model failed to load - falling back to always-on")
                 self.model = None
         else:
-            self.master_state.add_log_for_next_summary("❌ OpenWakeWord not available; mic will fall back to always-on")
+            self.master_state.add_log_for_next_summary("OpenWakeWord not available; mic will fall back to always-on")
             trace("wake", "OpenWakeWord not available")
 
         self.last_wake_word_detected = None
@@ -98,6 +189,7 @@ class WakeWordDetector:
         self.max_score_since_heartbeat = 0.0
         self.max_vad_since_heartbeat = 0.0
         self.max_rms_since_heartbeat = 0.0
+        self.max_noise_since_heartbeat = 0.0
 
         # Log config values at startup
         self._log_startup_config()
@@ -105,19 +197,21 @@ class WakeWordDetector:
     def _log_startup_config(self):
         """Log all wake word detection config values at startup."""
         cfg = self.master_state.conman
+        noise_stats = self.noise_manager.get_stats()
         config_info = (
             f"Wake detector config: "
             f"vad_thresh={cfg.get_config('VAD_THRESHOLD')}, "
-            f"wake_thresh={cfg.get_config('WAKE_WORD_THRESHOLD')}, "
-            f"peak_offset={cfg.get_config('WAKE_PEAK_OFFSET')}, "
-            f"avg_offset={cfg.get_config('WAKE_AVG_OFFSET')}, "
-            f"rms_thresh={cfg.get_config('WAKE_WORD_RMS_THRESHOLD')}, "
-            f"trigger_level={self.trigger_level}, "
-            f"vad_lookback={self.vad_trigger_lookback}"
+            f"entry={self.entry_threshold}, "
+            f"confirm_peak={self.confirm_peak}, "
+            f"confirm_cumul={self.confirm_cumulative}, "
+            f"min_frames={self.min_frames_above_entry}, "
+            f"cooldown={self.cooldown_frames}, "
+            f"noise_floor={noise_stats['target_floor']}, "
+            f"noise_max={noise_stats['max_injection']}"
         )
         print(config_info)
         trace("wake", config_info)
-        self.master_state.add_log_for_next_summary(f"🎤 {config_info}")
+        self.master_state.add_log_for_next_summary(f"Wake detector: {config_info}")
 
     def calculate_signal_strength(self, audio_samples: np.ndarray) -> float:
         """Calculate RMS (Root Mean Square) amplitude of audio signal."""
@@ -163,6 +257,68 @@ class WakeWordDetector:
             return True, ", ".join(issues)
         return False, ""
 
+    def _evaluate_cluster_detection(self, max_score: float) -> bool:
+        """
+        Cluster-based wake word detection with cumulative scoring.
+        
+        Returns True if wake word is detected, False otherwise.
+        """
+        # Handle cooldown
+        if self.cooldown_remaining > 0:
+            self.cooldown_remaining -= 1
+            return False
+        
+        above_entry = max_score >= self.entry_threshold
+        
+        if self.tracking:
+            # We're tracking a potential wake word
+            self.tracking_scores.append(max_score)
+            
+            if not above_entry:
+                # Score dropped below entry - evaluate the cluster
+                peak_score = max(self.tracking_scores)
+                cumulative_score = sum(self.tracking_scores)
+                frames_above = sum(1 for s in self.tracking_scores if s >= self.entry_threshold)
+                
+                wake_detected = False
+                detection_reason = ""
+                
+                if peak_score >= self.confirm_peak:
+                    # Traditional peak-based detection
+                    wake_detected = True
+                    detection_reason = f"peak={peak_score:.3f}"
+                elif cumulative_score >= self.confirm_cumulative and frames_above >= self.min_frames_above_entry:
+                    # Cumulative score detection (catches sustained moderate scores)
+                    wake_detected = True
+                    detection_reason = f"cumul={cumulative_score:.2f}, frames={frames_above}"
+                
+                # Reset tracking state
+                tracking_duration_ms = (time.time() - self.tracking_start_time) * 1000
+                num_frames = len(self.tracking_scores)
+                self.tracking = False
+                self.tracking_scores = []
+                
+                if wake_detected:
+                    self.cooldown_remaining = self.cooldown_frames
+                    self.last_wake_word_detected = self._monotonic_time()
+                    self.model.reset()
+                    
+                    print(f"Wake word detected: {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms)")
+                    self.master_state.add_log_for_next_summary(
+                        f"Wake word detected: {detection_reason} ({num_frames} frames)"
+                    )
+                    trace("wake", f"DETECTED - {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms)")
+                    return True
+        else:
+            # Not currently tracking
+            if above_entry:
+                # Start tracking
+                self.tracking = True
+                self.tracking_scores = [max_score]
+                self.tracking_start_time = time.time()
+        
+        return False
+
     def on_audio_buffer_in(
         self,
         audio_16ints: np.ndarray,
@@ -171,8 +327,8 @@ class WakeWordDetector:
         """
         Process audio and return (is_voice, is_wake_word).
 
-        - Always feeds the model (stateful streaming).
-        - Uses VAD gating + temporal smoothing to reduce false positives.
+        Uses cluster-based detection with auto-noise injection for improved
+        wake word recognition in quiet environments.
         """
 
         # If we have no model, just estimate voice and never fire wake word
@@ -181,15 +337,25 @@ class WakeWordDetector:
             is_voice = rms > 500.0  # simple fallback heuristic
             return (is_voice, False)
 
-        # --- VAD first (we keep history to use for gating)
+        # --- 1. Get VAD score on raw audio first (before noise injection)
         vad_score = self.model.vad.predict(audio_16ints)
         vad_threshold = self.master_state.conman.get_config("VAD_THRESHOLD")
         is_voice = vad_score > vad_threshold
-
         self.vad_history.append(is_voice)
 
-        # Calculate RMS for diagnostics
-        rms = self.calculate_signal_strength(audio_16ints)
+        # --- 2. Calculate raw RMS (for auto-noise tracking)
+        raw_rms = self.calculate_signal_strength(audio_16ints)
+
+        # --- 3. Update noise manager, get injection level
+        noise_level = self.noise_manager.update(raw_rms, vad_score)
+
+        # --- 4. Inject noise if needed
+        if noise_level > 0:
+            noise = np.random.randn(len(audio_16ints)) * noise_level
+            audio_16ints = np.clip(
+                audio_16ints.astype(np.float64) + noise,
+                -32768, 32767
+            ).astype(np.int16)
 
         now = time.time()
 
@@ -197,52 +363,18 @@ class WakeWordDetector:
         self.frames_since_heartbeat += 1
         if vad_score > self.max_vad_since_heartbeat:
             self.max_vad_since_heartbeat = vad_score
-        if rms > self.max_rms_since_heartbeat:
-            self.max_rms_since_heartbeat = rms
+        if raw_rms > self.max_rms_since_heartbeat:
+            self.max_rms_since_heartbeat = raw_rms
+        if noise_level > self.max_noise_since_heartbeat:
+            self.max_noise_since_heartbeat = noise_level
 
-        # return now if we're just filtering for voice (vs. listening for wakeword)
+        # Return now if we're just filtering for voice (vs. listening for wakeword)
         if vad_only:
             return (is_voice, False)
 
+        # --- 5. Run wake word prediction on noise-augmented audio
         scores_dict = self.model.predict(audio_16ints)
-
-        # --- Temporal smoothing of wake-word scores
-
-        # For multiple wakewords, you can swap this to something else (e.g., per-key)
         max_score = max(scores_dict.values()) if scores_dict else 0.0
-        self.score_history.append(max_score)
-
-        wake_threshold = self.master_state.conman.get_config("WAKE_WORD_THRESHOLD")
-
-        # Peak + Average hybrid: require strong peak AND decent average
-        recent_scores = list(self.score_history)[-self.trigger_level:]
-        peak_offset = self.master_state.conman.get_config("WAKE_PEAK_OFFSET") or 0.1
-        avg_offset = self.master_state.conman.get_config("WAKE_AVG_OFFSET") or 0.1
-        peak_threshold = wake_threshold + peak_offset
-        avg_threshold = wake_threshold - avg_offset
-        
-        if len(recent_scores) == self.trigger_level:
-            window_max_score = max(recent_scores)
-            avg_score = sum(recent_scores) / len(recent_scores)
-            has_sustained_high_scores = (
-                window_max_score >= peak_threshold and avg_score >= avg_threshold
-            )
-        else:
-            window_max_score = max_score
-            avg_score = max_score
-            has_sustained_high_scores = False
-
-        # --- VAD gating for acceptance
-
-        if self.vad_trigger_lookback > 0:
-            recent_vad = list(self.vad_history)[-self.vad_trigger_lookback:]
-            has_recent_voice = any(recent_vad) if recent_vad else is_voice
-        else:
-            has_recent_voice = is_voice
-
-        wake_candidate = has_sustained_high_scores and has_recent_voice
-
-        is_wake_word = False
 
         # Track max wake score for heartbeat
         if max_score > self.max_score_since_heartbeat:
@@ -250,12 +382,15 @@ class WakeWordDetector:
 
         # Periodic heartbeat logging - shows we're alive even when nothing is happening
         if (now - self.last_heartbeat_time) >= self.heartbeat_interval:
+            noise_stats = self.noise_manager.get_stats()
             trace("wake", 
                 f"heartbeat: frames={self.frames_since_heartbeat}, "
                 f"max_score={self.max_score_since_heartbeat:.3f}, "
                 f"max_vad={self.max_vad_since_heartbeat:.3f}, "
                 f"max_rms={self.max_rms_since_heartbeat:.0f}, "
-                f"thresh={wake_threshold}"
+                f"noise={self.max_noise_since_heartbeat:.0f}, "
+                f"ambient={noise_stats['ambient_rms']:.0f}, "
+                f"entry={self.entry_threshold}"
             )
             # Reset heartbeat stats
             self.last_heartbeat_time = now
@@ -263,107 +398,22 @@ class WakeWordDetector:
             self.max_score_since_heartbeat = 0.0
             self.max_vad_since_heartbeat = 0.0
             self.max_rms_since_heartbeat = 0.0
-
-        # Log near-activation events (rate-limited): scores approaching threshold
-        # This helps debug cases where someone's voice almost triggers wake word
-        near_threshold = wake_threshold * 0.6  # 60% of threshold = "near" activation
+            self.max_noise_since_heartbeat = 0.0
 
         # Log VAD activity when we have significant audio (rate-limited)
+        near_threshold = self.entry_threshold * 0.7  # 70% of entry = "near" activation
         if (now - self.last_vad_log_time) >= self.activity_log_interval:
             if max_score >= near_threshold or is_voice:
                 self.last_vad_log_time = now
+                tracking_info = f", tracking={len(self.tracking_scores)}" if self.tracking else ""
                 trace("wake", 
                     f"activity: vad={vad_score:.3f}/{vad_threshold}, voice={is_voice}, "
-                    f"wake={max_score:.3f}/{wake_threshold}, rms={rms:.0f}"
+                    f"wake={max_score:.3f}/{self.entry_threshold}, rms={raw_rms:.0f}, "
+                    f"noise={noise_level:.0f}{tracking_info}"
                 )
 
-        if max_score >= near_threshold and not wake_candidate:
-            if (now - self.last_near_activation_log_time) >= self.activity_log_interval:
-                self.last_near_activation_log_time = now
-                reason = []
-                if not has_sustained_high_scores:
-                    reason.append(f"peak/avg check failed (peak={window_max_score:.2f} need>={peak_threshold:.2f}, avg={avg_score:.2f} need>={avg_threshold:.2f})")
-                if not has_recent_voice:
-                    reason.append(f"no recent VAD (lookback={self.vad_trigger_lookback})")
-                self.master_state.add_log_for_next_summary(
-                    f"👂 Near-activation: wake_score={max_score:.2f} (thresh={wake_threshold}), "
-                    f"RMS={rms:.0f}, VAD={is_voice}, reason: {'; '.join(reason)}"
-                )
-                trace("wake", f"near-activation score={max_score:.2f} rms={rms:.0f} - {'; '.join(reason)}")
-
-        if wake_candidate:
-            # RMS-energy filter + debounce + safe error handling
-            trace("wake", 
-                f"CANDIDATE: score={max_score:.3f}, peak={window_max_score:.3f}>={peak_threshold:.3f}, "
-                f"avg={avg_score:.3f}>={avg_threshold:.3f}, vad={is_voice}"
-            )
-            try:
-                raw_audio_history = np.array(
-                    list(self.model.preprocessor.raw_data_buffer)
-                ).astype(np.int16)
-
-                if raw_audio_history.size == 0:
-                    raise ValueError("raw_data_buffer is empty")
-
-                # Use last ~0.75s of audio or the full buffer if smaller
-                if raw_audio_history.shape[0] > self.rms_window_samples:
-                    wake_word_audio = raw_audio_history[-self.rms_window_samples:]
-                else:
-                    wake_word_audio = raw_audio_history
-
-                rms_strength = self.calculate_signal_strength(wake_word_audio)
-
-                min_strength = self.master_state.conman.get_config("WAKE_WORD_RMS_THRESHOLD")
-                if min_strength is None:
-                    min_strength = 1100.0  # default fallback
-
-                now = self._monotonic_time()
-                if self.last_wake_word_detected is not None:
-                    # Convert last_wake_word_detected to monotonic if it was stored as time.time()
-                    last_detected = self.last_wake_word_detected
-                    if hasattr(time, 'monotonic'):
-                        # If we have monotonic time, ensure we're comparing apples to apples
-                        # For first use after upgrade, last_wake_word_detected might be in time.time() format
-                        # This is a one-time conversion issue, but safe to handle
-                        pass
-                    debounce_ok = (now - last_detected) > self.wake_to_wake_min_time
-                else:
-                    debounce_ok = True
-
-                if rms_strength >= min_strength and debounce_ok:
-                    print(
-                        f"🎯 Wake word detected (smoothed): "
-                        f"score={max_score:.2f}, RMS={rms_strength:.0f}"
-                    )
-                    self.master_state.add_log_for_next_summary(
-                        f"🎯 Wake word detected (smoothed): "
-                        f"score={max_score:.2f}, RMS={rms_strength:.0f}"
-                    )
-                    trace("wake", f"DETECTED - accepted score={max_score:.2f} rms={rms_strength:.0f}")
-                    print("✅ Wake word accepted")
-                    self.last_wake_word_detected = now
-                    is_wake_word = True
-                    self.model.reset()
-                else:
-                    self.master_state.add_log_for_next_summary(f"⏱️ Wake word candidate rejected: {rms_strength:.0f} < {min_strength}, {debounce_ok}")
-                    if not debounce_ok:
-                        print("⏱️ Wake word candidate rejected: within debounce window")
-                        trace("wake", f"rejected: debounce (score={max_score:.2f})")
-                    else:
-                        print(
-                            f"🔇 Wake word rejected: insufficient signal strength "
-                            f"{rms_strength:.0f} < {min_strength}"
-                        )
-                        trace("wake", f"rejected: low rms={rms_strength:.0f} < {min_strength}")
-
-            except Exception as e:
-                msg = (
-                    f"⚠️ Error checking signal strength for wake word candidate: {e}. "
-                    "Wake word NOT accepted."
-                )
-                print(msg)
-                self.master_state.add_log_for_next_summary(msg)
-                # is_wake_word remains False
+        # --- 6. Cluster-based detection
+        is_wake_word = self._evaluate_cluster_detection(max_score)
 
         return (is_voice, is_wake_word)
 
@@ -390,27 +440,29 @@ async def mic_listener(manager: AsyncManager) -> None:
         if not wake_detector.model:
             wake_detector = None
 
-    push_to_talk_active = True
-
     if wake_detector is None:
-        if not manager.master_state.system_type == "mac":
-            # if there's no wake detector and we're not testing, fire up
-            mic_is_live_to_assistant = True
-            user_is_speaking = True
-            await manager.event_q.put(USER_SAID_WAKE_WORD)
-            manager.master_state.add_log_for_next_summary("⚠️ Wake detection unavailable; mic started in always-on mode (auto wake word)")
-        else:
-            # we are in QA mode on mac, require push to talk start event
-            push_to_talk_active = False
-            mic_is_live_to_assistant = False
+        # No wake detector available - go to always-on mode
+        mic_is_live_to_assistant = True
+        user_is_speaking = True
+        await manager.event_q.put(USER_SAID_WAKE_WORD)
+        manager.master_state.add_log_for_next_summary("⚠️ Wake detection unavailable; mic started in always-on mode")
     else:
-        #  not testing - we're live... require wake word
+        # Wake detector ready - wait for wake word
         mic_is_live_to_assistant = False
         user_is_speaking = False
         print("💤 Say '"+manager.master_state.conman.get_wake_word_model()+"' to start")
 
     last_voice_activity_time = None
     should_exit = False
+    
+    # Local VAD gating - only stream when voice detected (saves bandwidth/API costs)
+    local_vad_gate_enabled = manager.master_state.conman.get_config("LOCAL_VAD_GATE")
+    preroll_frame_count = int(manager.master_state.conman.get_config("LOCAL_VAD_PREROLL_FRAMES") or 5)
+    preroll_buffer = deque(maxlen=preroll_frame_count)  # Circular buffer for speech onset capture
+    was_voice_active = False  # Track voice state transitions for pre-roll flush
+    
+    if local_vad_gate_enabled:
+        trace("mic", f"Local VAD gating enabled with {preroll_frame_count} frame pre-roll buffer")
     
     # Open the stream
     stream = manager.master_state.pa.open(
@@ -447,30 +499,26 @@ async def mic_listener(manager: AsyncManager) -> None:
                         # go to sleep
                         trace("mic", "going to sleep - listening for wake word")
                         mic_is_live_to_assistant = False
+                        preroll_buffer.clear()  # Clear pre-roll to avoid stale audio
+                        was_voice_active = False
                     elif event == ASSISTANT_RESUME_AFTER_AUTO_SUMMARY:
                         trace("mic", "resuming after auto-summary")
                         mic_is_live_to_assistant = True
+                        preroll_buffer.clear()  # Fresh start after summary
+                        was_voice_active = False
 
                 elif event_type == "input":
-
-                    # handle QA mode keyboard push to talk events
-                    if isinstance(event, str):
-                        if event==USER_SAID_WAKE_WORD:
-                            mic_is_live_to_assistant = True
-                            await manager.event_q.put(USER_SAID_WAKE_WORD)
-                        else:
-                            push_to_talk_active = event == PUSH_TO_TALK_START
-                        continue
 
                     # Convert bytes to numpy array
                     event = np.frombuffer(event, dtype=np.int16)
 
                     # feed the new audio to the local model.  detect voice always so we can stop sending to the assistant if its just noise.
-                    # if we are currently not sending to tjhe assistant, also check for wake word.
+                    # if we are currently not sending to the assistant, also check for wake word.
                     if wake_detector:
                         is_voice, is_wake_word = wake_detector.on_audio_buffer_in(event, vad_only=mic_is_live_to_assistant)
                     else:
-                        is_voice = push_to_talk_active
+                        # No wake detector - always-on mode, always consider voice active
+                        is_voice = True
                         is_wake_word = False
 
                     if not mic_is_live_to_assistant:
@@ -478,12 +526,17 @@ async def mic_listener(manager: AsyncManager) -> None:
                             mic_is_live_to_assistant = True
                             await manager.event_q.put(USER_SAID_WAKE_WORD)
 
-                            # wait past the wake word and flush partial audio
+                            # wait past the wake word and flush partial audio from input AND output queues
                             await asyncio.sleep(1.0)
                             try:
                                 deadman = 100
                                 while not manager.input_q.empty() and deadman > 0:
                                     manager.input_q.get_nowait()
+                                    deadman -= 1
+                                # Also flush output queue to prevent stale audio reaching assistant
+                                deadman = 100
+                                while not manager.output_q.empty() and deadman > 0:
+                                    manager.output_q.get_nowait()
                                     deadman -= 1
                             except:
                                 print("❌ Error flushing partial audio")
@@ -500,15 +553,39 @@ async def mic_listener(manager: AsyncManager) -> None:
                         else:
                             last_voice_activity_time = None
 
-                    # Always send audio when live - let server VAD decide what's speech
-                    await manager.output_q.put(event)
+                    # Local VAD gating: only send audio when voice is detected
+                    # This saves bandwidth and API costs by not streaming silence/noise
+                    if local_vad_gate_enabled:
+                        if is_voice:
+                            # Voice detected - check if this is a new voice onset
+                            if not was_voice_active:
+                                # Flush pre-roll buffer to capture speech onset
+                                for preroll_frame in preroll_buffer:
+                                    await manager.output_q.put(preroll_frame)
+                                preroll_buffer.clear()
+                                was_voice_active = True
+                                trace("mic", f"Voice onset - flushed {preroll_frame_count} pre-roll frames")
+                            # Send current frame
+                            await manager.output_q.put(event)
+                        else:
+                            # No voice - just buffer for potential pre-roll
+                            preroll_buffer.append(event)
+                            was_voice_active = False
+                    else:
+                        # VAD gating disabled - always send audio (original behavior)
+                        await manager.output_q.put(event)
 
-                    # Track speaking state for UI/interruption events only
+                    # Track speaking state for UI/interruption events
+                    # When using wake word detection (server VAD mode), disable local interruption
+                    # because server VAD handles turn detection and local VAD causes false interrupts
                     if is_voice:
                         if not user_is_speaking:
                             user_is_speaking = True
-                            print("🔄 USER_STARTED_SPEAKING")
-                            await manager.event_q.put(USER_STARTED_SPEAKING)
+                            # Only send USER_STARTED_SPEAKING if NOT using wake word detection
+                            # With wake word, server VAD handles turns; local VAD causes false interrupts
+                            if wake_detector is None:
+                                print("🔄 USER_STARTED_SPEAKING")
+                                await manager.event_q.put(USER_STARTED_SPEAKING)
                     else:
                         user_is_speaking = False
 

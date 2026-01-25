@@ -73,17 +73,59 @@ def apply_simple_noise_gate(audio_16, threshold=500.0):
     
     return audio_16
 
-def upsample_audio_efficient(audio_16):
+def normalize_audio(audio_16, target_energy=2000, max_gain=20.0):
+    """
+    Normalize audio to a target energy level for consistent input to speech recognition.
+    
+    This helps when microphone levels vary between devices (e.g., Mac vs Raspberry Pi).
+    Uses adaptive gain to boost quiet audio while preventing clipping on loud audio.
+    
+    Args:
+        audio_16: numpy array of int16 samples
+        target_energy: Target mean absolute value (default 2000, good for speech)
+        max_gain: Maximum amplification factor to prevent noise amplification (default 20x)
+    
+    Returns:
+        numpy array: Normalized int16 audio
+    """
+    # Calculate current energy
+    audio_32 = audio_16.astype(np.int32)
+    current_energy = np.mean(np.abs(audio_32))
+    
+    # Skip if already silent (avoid amplifying pure noise)
+    if current_energy < 5:
+        return audio_16
+    
+    # Calculate needed gain, capped at max_gain
+    gain = min(target_energy / current_energy, max_gain)
+    
+    # Only amplify if gain > 1 (don't attenuate)
+    if gain <= 1.0:
+        return audio_16
+    
+    # Apply gain with clipping protection
+    amplified = audio_32 * gain
+    amplified = np.clip(amplified, -32768, 32767)
+    
+    return amplified.astype(np.int16)
+
+
+def upsample_audio_efficient(audio_16, normalize=True):
     """
     Efficient upsampling from 16kHz to 24kHz for limited hardware.
     Uses simple linear interpolation to minimize CPU and memory usage.
     
     Args:
         audio_16: numpy array of int16 samples at 16kHz
+        normalize: Whether to normalize audio levels (default True, helps with quiet mics)
     
     Returns:
         bytes: Upsampled audio at 24kHz as bytes (16-bit samples)
     """
+    # Normalize audio if enabled (helps with quiet microphones)
+    if normalize:
+        audio_16 = normalize_audio(audio_16)
+    
     # Calculate output length (1.5x the input)
     output_length = int(len(audio_16) * 1.5)
     
