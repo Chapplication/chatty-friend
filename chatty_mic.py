@@ -191,6 +191,12 @@ class WakeWordDetector:
         self.max_rms_since_heartbeat = 0.0
         self.max_noise_since_heartbeat = 0.0
 
+        # --- Instrumentation ring buffer for wake word analysis
+        # Captures ~5 seconds of history (62 frames at 80ms each)
+        # Dumped to log on wake word detection to help diagnose false positives
+        self.history_buffer_size = 62  # ~5 seconds
+        self.frame_history = deque(maxlen=self.history_buffer_size)
+
         # Log config values at startup
         self._log_startup_config()
 
@@ -212,6 +218,90 @@ class WakeWordDetector:
         print(config_info)
         trace("wake", config_info)
         self.master_state.add_log_for_next_summary(f"Wake detector: {config_info}")
+
+    def _record_frame(self, vad_score: float, wake_score: float, rms: float, 
+                      noise_level: float, is_tracking: bool):
+        """Record a frame's data to the history buffer for later analysis."""
+        self.frame_history.append({
+            't': time.time(),
+            'vad': vad_score,
+            'wake': wake_score,
+            'rms': rms,
+            'noise': noise_level,
+            'tracking': is_tracking,
+        })
+
+    def _dump_detection_history(self, detection_reason: str, num_frames: int, 
+                                 duration_ms: float, scores: list):
+        """
+        Dump the frame history to logs when wake word is detected.
+        This helps analyze false positives by showing context before detection.
+        """
+        if not self.frame_history:
+            return
+        
+        history = list(self.frame_history)
+        
+        # Calculate derived metrics for analysis
+        vad_scores = [f['vad'] for f in history]
+        wake_scores = [f['wake'] for f in history]
+        rms_values = [f['rms'] for f in history]
+        
+        # Find silence gaps (low VAD periods) in the history
+        vad_threshold = self.master_state.conman.get_config("VAD_THRESHOLD") or 0.3
+        silence_frames = sum(1 for v in vad_scores if v < vad_threshold)
+        voice_frames = len(vad_scores) - silence_frames
+        
+        # Check for pre-detection silence (was there quiet before tracking started?)
+        # Look at the last 20 frames (~1.6s) before detection
+        recent_frames = history[-20:] if len(history) >= 20 else history
+        pre_silence_count = 0
+        for i, f in enumerate(recent_frames):
+            if f['tracking']:
+                # Count silence frames before tracking started
+                pre_silence_count = sum(1 for ff in recent_frames[:i] if ff['vad'] < vad_threshold)
+                break
+        
+        # Find continuous speech duration before detection
+        continuous_voice_before = 0
+        for f in reversed(history[:-num_frames] if num_frames < len(history) else []):
+            if f['vad'] >= vad_threshold:
+                continuous_voice_before += 1
+            else:
+                break
+        continuous_voice_ms = continuous_voice_before * 80  # 80ms per frame
+        
+        # Build summary line
+        summary = (
+            f"WAKE HISTORY: {detection_reason} | "
+            f"duration={duration_ms:.0f}ms | "
+            f"history={len(history)} frames (~{len(history)*80/1000:.1f}s) | "
+            f"voice={voice_frames}/{len(history)} frames | "
+            f"pre_silence={pre_silence_count} frames | "
+            f"continuous_voice_before={continuous_voice_ms}ms"
+        )
+        trace("wake", summary)
+        
+        # Dump detailed per-frame data (compact format)
+        # Format: relative_time, vad, wake, rms, tracking_flag
+        # Group into lines of ~10 frames for readability
+        base_time = history[0]['t']
+        frame_data = []
+        for f in history:
+            rel_t = (f['t'] - base_time) * 1000  # ms since start
+            tracking_flag = "T" if f['tracking'] else "."
+            # Compact format: time|vad|wake|rms|flag
+            frame_data.append(f"{rel_t:5.0f}|{f['vad']:.2f}|{f['wake']:.3f}|{f['rms']:5.0f}|{tracking_flag}")
+        
+        # Log in chunks of 10 frames per line
+        chunk_size = 10
+        for i in range(0, len(frame_data), chunk_size):
+            chunk = frame_data[i:i+chunk_size]
+            frame_nums = f"[{i:2d}-{min(i+chunk_size-1, len(frame_data)-1):2d}]"
+            trace("wake", f"  {frame_nums} " + "  ".join(chunk))
+        
+        # Log the actual detection scores
+        trace("wake", f"  DETECTION SCORES: [{','.join(f'{s:.3f}' for s in scores)}]")
 
     def calculate_signal_strength(self, audio_samples: np.ndarray) -> float:
         """Calculate RMS (Root Mean Square) amplitude of audio signal."""
@@ -274,6 +364,9 @@ class WakeWordDetector:
             # We're tracking a potential wake word
             self.tracking_scores.append(max_score)
             
+            # Log each frame while tracking for debugging
+            trace("wake", f"tracking: frame={len(self.tracking_scores)}, score={max_score:.3f}, above_entry={above_entry}")
+            
             if not above_entry:
                 # Score dropped below entry - evaluate the cluster
                 peak_score = max(self.tracking_scores)
@@ -282,8 +375,9 @@ class WakeWordDetector:
                 
                 wake_detected = False
                 detection_reason = ""
+                rejection_reason = ""
                 
-                if peak_score >= self.confirm_peak:
+                if peak_score >= self.confirm_peak and frames_above>1:
                     # Traditional peak-based detection
                     wake_detected = True
                     detection_reason = f"peak={peak_score:.3f}"
@@ -291,10 +385,15 @@ class WakeWordDetector:
                     # Cumulative score detection (catches sustained moderate scores)
                     wake_detected = True
                     detection_reason = f"cumul={cumulative_score:.2f}, frames={frames_above}"
+                else:
+                    # Cluster rejected - build rejection reason for debugging
+                    rejection_reason = f"peak={peak_score:.3f}<{self.confirm_peak}, cumul={cumulative_score:.2f}<{self.confirm_cumulative}, frames={frames_above}"
                 
-                # Reset tracking state
+                # Reset tracking state (save scores before clearing)
                 tracking_duration_ms = (time.time() - self.tracking_start_time) * 1000
                 num_frames = len(self.tracking_scores)
+                detection_scores = list(self.tracking_scores)  # Copy for history dump
+                scores_str = ",".join(f"{s:.2f}" for s in self.tracking_scores[-10:])  # Last 10 scores
                 self.tracking = False
                 self.tracking_scores = []
                 
@@ -303,19 +402,27 @@ class WakeWordDetector:
                     self.last_wake_word_detected = self._monotonic_time()
                     self.model.reset()
                     
-                    print(f"Wake word detected: {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms)")
+                    print(f"🎯 Wake word DETECTED: {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms)")
                     self.master_state.add_log_for_next_summary(
                         f"Wake word detected: {detection_reason} ({num_frames} frames)"
                     )
-                    trace("wake", f"DETECTED - {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms)")
+                    trace("wake", f"DETECTED - {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms, scores=[{scores_str}])")
+                    
+                    # Dump full history buffer to help analyze false positives
+                    self._dump_detection_history(detection_reason, num_frames, tracking_duration_ms, detection_scores)
+                    
                     return True
+                else:
+                    # Log rejected clusters to help debug false positives and missed detections
+                    trace("wake", f"REJECTED - {rejection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms, scores=[{scores_str}])")
         else:
             # Not currently tracking
             if above_entry:
-                # Start tracking
+                # Start tracking - log this event
                 self.tracking = True
                 self.tracking_scores = [max_score]
                 self.tracking_start_time = time.time()
+                trace("wake", f"TRACKING START - initial_score={max_score:.3f}, entry_threshold={self.entry_threshold}")
         
         return False
 
@@ -380,6 +487,9 @@ class WakeWordDetector:
         if max_score > self.max_score_since_heartbeat:
             self.max_score_since_heartbeat = max_score
 
+        # --- 6. Record frame to history buffer for detection analysis
+        self._record_frame(vad_score, max_score, raw_rms, noise_level, self.tracking)
+
         # Periodic heartbeat logging - shows we're alive even when nothing is happening
         if (now - self.last_heartbeat_time) >= self.heartbeat_interval:
             noise_stats = self.noise_manager.get_stats()
@@ -400,16 +510,19 @@ class WakeWordDetector:
             self.max_rms_since_heartbeat = 0.0
             self.max_noise_since_heartbeat = 0.0
 
-        # Log VAD activity when we have significant audio (rate-limited)
+        # Log activity when audio detected (rate-limited to 1/sec)
+        # Note: VAD detects ANY audio activity (music, noise), not just speech
+        # Wake score detects the specific wake word pattern
         near_threshold = self.entry_threshold * 0.7  # 70% of entry = "near" activation
         if (now - self.last_vad_log_time) >= self.activity_log_interval:
             if max_score >= near_threshold or is_voice:
                 self.last_vad_log_time = now
-                tracking_info = f", tracking={len(self.tracking_scores)}" if self.tracking else ""
+                tracking_info = f", TRACKING({len(self.tracking_scores)})" if self.tracking else ""
+                # Explain: vad=audio_activity, wake=wake_word_score
                 trace("wake", 
-                    f"activity: vad={vad_score:.3f}/{vad_threshold}, voice={is_voice}, "
-                    f"wake={max_score:.3f}/{self.entry_threshold}, rms={raw_rms:.0f}, "
-                    f"noise={noise_level:.0f}{tracking_info}"
+                    f"audio: vad={vad_score:.3f}(thr={vad_threshold}), "
+                    f"wake={max_score:.3f}(thr={self.entry_threshold}), "
+                    f"rms={raw_rms:.0f}, noise_inj={noise_level:.0f}{tracking_info}"
                 )
 
         # --- 6. Cluster-based detection

@@ -489,6 +489,68 @@ The architecture evolves through layers of complexity, starting simple and addin
 1. Create new file in `tools/` directory based on any of the simple examples there
 2. Register in `chatty_tools.py` by adding your new tool to the list
 
+### Remote Debug Logging
+
+Chatty Friend includes a debug log server for real-time monitoring of a running device. This is invaluable for:
+- Debugging wake word detection issues
+- Monitoring audio pipeline behavior
+- Troubleshooting false positives or missed wake words
+
+**Enable the debug server** (enabled by default):
+```json
+{
+  "DEBUG_SERVER_ENABLED": true,
+  "DEBUG_SERVER_PORT": 9999
+}
+```
+
+**Connect from your development machine:**
+```bash
+# Stream all logs
+python debug_client.py 192.168.1.100
+
+# Filter to specific component
+python debug_client.py 192.168.1.100 --filter wake
+python debug_client.py 192.168.1.100 --filter mic
+python debug_client.py 192.168.1.100 -f ws
+
+# Auto-reconnect on disconnect
+python debug_client.py 192.168.1.100 -r
+
+# Alternative with netcat (no Python needed)
+nc 192.168.1.100 9999
+```
+
+**Available log components:**
+| Component | Description |
+|-----------|-------------|
+| `wake` | Wake word detection, VAD activity, tracking events |
+| `mic` | Microphone input, audio capture |
+| `audio_out` | Audio streaming to OpenAI |
+| `ws` | WebSocket connection events |
+| `spkr` | Speaker output, playback |
+| `tool` | Tool invocations |
+| `main` | Main application events |
+
+**Understanding wake word logs:**
+```
+# Audio activity (logged every ~1 sec when audio detected)
+# Note: vad detects ANY audio (music, noise), not just speech
+audio: vad=0.375(thr=0.3), wake=0.001(thr=0.35), rms=155, noise_inj=0
+
+# Wake word tracking started (score crossed entry threshold)
+TRACKING START - initial_score=0.38, entry_threshold=0.35
+
+# Each frame while tracking
+tracking: frame=2, score=0.42, above_entry=True
+
+# Cluster rejected (didn't meet confirmation thresholds)
+REJECTED - peak=0.42<0.45, cumul=0.80<1.2, frames=2 (2 frames, 160ms, scores=[0.38,0.42])
+
+# Wake word detected!
+DETECTED - peak=0.52 (3 frames, 240ms, scores=[0.38,0.45,0.52])
+```
+
 ## 🍓 Raspberry Pi Deployment
 
 ### Recommended Hardware
