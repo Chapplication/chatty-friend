@@ -128,6 +128,7 @@ class WakeWordDetector:
         # --- Cluster-based detection state
         self.tracking = False
         self.tracking_scores = []
+        self.tracking_vad_scores = []  # Track VAD during detection for gating
         self.tracking_start_time = 0.0
         self.cooldown_remaining = 0
 
@@ -347,9 +348,9 @@ class WakeWordDetector:
             return True, ", ".join(issues)
         return False, ""
 
-    def _evaluate_cluster_detection(self, max_score: float) -> bool:
+    def _evaluate_cluster_detection(self, max_score: float, vad_score: float, vad_threshold: float) -> bool:
         """
-        Cluster-based wake word detection with cumulative scoring.
+        Cluster-based wake word detection with cumulative scoring and VAD gating.
         
         Returns True if wake word is detected, False otherwise.
         """
@@ -359,13 +360,15 @@ class WakeWordDetector:
             return False
         
         above_entry = max_score >= self.entry_threshold
+        is_voice = vad_score > vad_threshold
         
         if self.tracking:
             # We're tracking a potential wake word
             self.tracking_scores.append(max_score)
+            self.tracking_vad_scores.append(vad_score)
             
             # Log each frame while tracking for debugging
-            trace("wake", f"tracking: frame={len(self.tracking_scores)}, score={max_score:.3f}, above_entry={above_entry}")
+            trace("wake", f"tracking: frame={len(self.tracking_scores)}, score={max_score:.3f}, vad={vad_score:.2f}, above_entry={above_entry}")
             
             if not above_entry:
                 # Score dropped below entry - evaluate the cluster
@@ -373,12 +376,20 @@ class WakeWordDetector:
                 cumulative_score = sum(self.tracking_scores)
                 frames_above = sum(1 for s in self.tracking_scores if s >= self.entry_threshold)
                 
+                # VAD gating: require at least one voice frame during tracking
+                voice_frames = sum(1 for v in self.tracking_vad_scores if v > vad_threshold)
+                has_voice = voice_frames > 0
+                max_vad = max(self.tracking_vad_scores)
+                
                 wake_detected = False
                 detection_reason = ""
                 rejection_reason = ""
                 
-                if peak_score >= self.confirm_peak and frames_above>1:
-                    # Traditional peak-based detection
+                if not has_voice:
+                    # No voice activity - reject as noise spike
+                    rejection_reason = f"NO_VOICE (peak={peak_score:.3f}, max_vad={max_vad:.2f}<{vad_threshold})"
+                elif peak_score >= self.confirm_peak and frames_above > 1:
+                    # Traditional peak-based detection (with voice present)
                     wake_detected = True
                     detection_reason = f"peak={peak_score:.3f}"
                 elif cumulative_score >= self.confirm_cumulative and frames_above >= self.min_frames_above_entry:
@@ -394,19 +405,21 @@ class WakeWordDetector:
                 num_frames = len(self.tracking_scores)
                 detection_scores = list(self.tracking_scores)  # Copy for history dump
                 scores_str = ",".join(f"{s:.2f}" for s in self.tracking_scores[-10:])  # Last 10 scores
+                vad_str = ",".join(f"{v:.2f}" for v in self.tracking_vad_scores[-10:])  # Last 10 VAD scores
                 self.tracking = False
                 self.tracking_scores = []
+                self.tracking_vad_scores = []
                 
                 if wake_detected:
                     self.cooldown_remaining = self.cooldown_frames
                     self.last_wake_word_detected = self._monotonic_time()
                     self.model.reset()
                     
-                    print(f"🎯 Wake word DETECTED: {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms)")
+                    print(f"Wake word DETECTED: {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms)")
                     self.master_state.add_log_for_next_summary(
                         f"Wake word detected: {detection_reason} ({num_frames} frames)"
                     )
-                    trace("wake", f"DETECTED - {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms, scores=[{scores_str}])")
+                    trace("wake", f"DETECTED - {detection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms, scores=[{scores_str}], vad=[{vad_str}])")
                     
                     # Dump full history buffer to help analyze false positives
                     self._dump_detection_history(detection_reason, num_frames, tracking_duration_ms, detection_scores)
@@ -414,15 +427,16 @@ class WakeWordDetector:
                     return True
                 else:
                     # Log rejected clusters to help debug false positives and missed detections
-                    trace("wake", f"REJECTED - {rejection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms, scores=[{scores_str}])")
+                    trace("wake", f"REJECTED - {rejection_reason} ({num_frames} frames, {tracking_duration_ms:.0f}ms, scores=[{scores_str}], vad=[{vad_str}])")
         else:
             # Not currently tracking
             if above_entry:
                 # Start tracking - log this event
                 self.tracking = True
                 self.tracking_scores = [max_score]
+                self.tracking_vad_scores = [vad_score]
                 self.tracking_start_time = time.time()
-                trace("wake", f"TRACKING START - initial_score={max_score:.3f}, entry_threshold={self.entry_threshold}")
+                trace("wake", f"TRACKING START - initial_score={max_score:.3f}, vad={vad_score:.2f}, entry_threshold={self.entry_threshold}")
         
         return False
 
@@ -525,8 +539,8 @@ class WakeWordDetector:
                     f"rms={raw_rms:.0f}, noise_inj={noise_level:.0f}{tracking_info}"
                 )
 
-        # --- 6. Cluster-based detection
-        is_wake_word = self._evaluate_cluster_detection(max_score)
+        # --- 6. Cluster-based detection with VAD gating
+        is_wake_word = self._evaluate_cluster_detection(max_score, vad_score, vad_threshold)
 
         return (is_voice, is_wake_word)
 
