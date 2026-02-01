@@ -1768,14 +1768,53 @@ else:  # we have wifi and authentication!
                     else:
                         st.error(f"❌ Error resetting configuration: {message}")
         
+        # Software upgrade section
+        if IS_PI:
+            st.divider()
+            st.subheader("Software Upgrade")
+            st.info("Pull the latest code from GitHub and restart the voice assistant service.")
+            
+            if st.button("Upgrade Software", key="upgrade_software", type="secondary"):
+                st.warning("Pulling latest code from GitHub...")
+                try:
+                    # Get the directory where chatty_web.py is located
+                    import os
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    
+                    # Run git pull
+                    result = subprocess.run(
+                        ['git', 'pull'],
+                        cwd=script_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    )
+                    
+                    if result.returncode == 0:
+                        st.success(f"Git pull successful:\n```\n{result.stdout}\n```")
+                        st.warning("Restarting voice assistant service...")
+                        time.sleep(1)
+                        
+                        # Restart the chatty service (not the whole system)
+                        if not TESTING_PI_UI_MOCK_SYSTEM_CALLS:
+                            subprocess.run(['sudo', 'systemctl', 'restart', 'start_chatty.service'], check=False)
+                        
+                        st.success("Service restart initiated. The voice assistant will be back online shortly.")
+                    else:
+                        st.error(f"Git pull failed:\n```\n{result.stderr}\n```")
+                except subprocess.TimeoutExpired:
+                    st.error("Git pull timed out. Check network connection.")
+                except Exception as e:
+                    st.error(f"Upgrade failed: {str(e)}")
+        
         # System restart section
         if IS_PI:
             st.divider()
-            st.subheader("🔄 System Restart")
-            st.info("💡 Restart the entire system (Raspberry Pi only)")
+            st.subheader("System Restart")
+            st.info("Restart the entire system (Raspberry Pi only)")
             
-            if st.button("🔄 Restart System", key="restart_system", type="secondary"):
-                st.warning("🔄 System is restarting...")
+            if st.button("Restart System", key="restart_system", type="secondary"):
+                st.warning("System is restarting...")
                 time.sleep(2)
                 if not TESTING_PI_UI_MOCK_SYSTEM_CALLS:
                     subprocess.run(['sudo', 'reboot'], check=False)

@@ -389,6 +389,11 @@ class WakeWordDetector:
                 has_voice = voice_frames_tracking > 0 or voice_frames_history > 0
                 max_vad_tracking = max(self.tracking_vad_scores) if self.tracking_vad_scores else 0
                 
+                # Require VAD to peak significantly above threshold during tracking
+                # This filters out background speech that happens to coincide with a wake score spike
+                vad_peak_required = min(vad_threshold + 0.3, 1.0)
+                has_strong_voice = max_vad_tracking >= vad_peak_required
+                
                 wake_detected = False
                 detection_reason = ""
                 rejection_reason = ""
@@ -404,6 +409,9 @@ class WakeWordDetector:
                 if not has_voice:
                     # No voice activity in tracking or recent history - reject as noise spike
                     rejection_reason = f"NO_VOICE (peak={peak_score:.3f}, max_vad={max_vad_tracking:.2f}<{vad_threshold}, history_voice={voice_frames_history}/{vad_lookback})"
+                elif not has_strong_voice:
+                    # Voice present but never peaked high enough - likely background speech not directed at device
+                    rejection_reason = f"WEAK_VOICE (peak={peak_score:.3f}, max_vad={max_vad_tracking:.2f}<{vad_peak_required:.2f})"
                 elif peak_score >= self.confirm_peak and frames_above > 1:
                     # Traditional peak-based detection (with voice present)
                     wake_detected = True
