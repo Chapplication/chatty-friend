@@ -119,7 +119,9 @@ class WakeWordDetector:
         self.frame_samples = int(self.sample_rate * self.frame_duration_sec)  # 1280
 
         # --- VAD history for is_voice detection
+        # Store actual VAD scores (not just booleans) for max_vad lookback
         self.vad_history = deque(maxlen=25)
+        self.vad_score_history = deque(maxlen=25)  # Track actual scores for peak detection
 
         # --- Activity logging state (rate-limited to once per second)
         self.activity_log_interval = 1.0  # seconds between activity logs
@@ -389,10 +391,20 @@ class WakeWordDetector:
                 has_voice = voice_frames_tracking > 0 or voice_frames_history > 0
                 max_vad_tracking = max(self.tracking_vad_scores) if self.tracking_vad_scores else 0
                 
-                # Require VAD to peak significantly above threshold during tracking
+                # Get max VAD from history window (BEFORE tracking started)
+                # This is critical: wake word model has ~200-400ms latency, so by the time
+                # the wake score spikes, the actual voice has often already passed
+                recent_vad_scores = list(self.vad_score_history)[-vad_lookback:] if self.vad_score_history else []
+                max_vad_history = max(recent_vad_scores) if recent_vad_scores else 0
+                
+                # Use the MAXIMUM of tracking VAD and recent history VAD
+                # This accounts for wake word model latency where voice precedes wake score
+                max_vad_combined = max(max_vad_tracking, max_vad_history)
+                
+                # Require VAD to peak significantly above threshold (in tracking OR recent history)
                 # This filters out background speech that happens to coincide with a wake score spike
                 vad_peak_required = min(vad_threshold + 0.3, 1.0)
-                has_strong_voice = max_vad_tracking >= vad_peak_required
+                has_strong_voice = max_vad_combined >= vad_peak_required
                 
                 wake_detected = False
                 detection_reason = ""
@@ -411,7 +423,7 @@ class WakeWordDetector:
                     rejection_reason = f"NO_VOICE (peak={peak_score:.3f}, max_vad={max_vad_tracking:.2f}<{vad_threshold}, history_voice={voice_frames_history}/{vad_lookback})"
                 elif not has_strong_voice:
                     # Voice present but never peaked high enough - likely background speech not directed at device
-                    rejection_reason = f"WEAK_VOICE (peak={peak_score:.3f}, max_vad={max_vad_tracking:.2f}<{vad_peak_required:.2f})"
+                    rejection_reason = f"WEAK_VOICE (peak={peak_score:.3f}, max_vad_tracking={max_vad_tracking:.2f}, max_vad_history={max_vad_history:.2f}, combined={max_vad_combined:.2f}<{vad_peak_required:.2f})"
                 elif peak_score >= self.confirm_peak and frames_above > 1:
                     # Traditional peak-based detection (with voice present)
                     wake_detected = True
@@ -487,6 +499,7 @@ class WakeWordDetector:
         vad_threshold = self.master_state.conman.get_config("VAD_THRESHOLD")
         is_voice = vad_score > vad_threshold
         self.vad_history.append(is_voice)
+        self.vad_score_history.append(vad_score)  # Track actual score for peak detection
 
         # --- 2. Calculate raw RMS (for auto-noise tracking)
         raw_rms = self.calculate_signal_strength(audio_16ints)
