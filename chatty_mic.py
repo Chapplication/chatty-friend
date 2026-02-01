@@ -376,29 +376,45 @@ class WakeWordDetector:
                 cumulative_score = sum(self.tracking_scores)
                 frames_above = sum(1 for s in self.tracking_scores if s >= self.entry_threshold)
                 
-                # VAD gating: require at least one voice frame during tracking
-                voice_frames = sum(1 for v in self.tracking_vad_scores if v > vad_threshold)
-                has_voice = voice_frames > 0
-                max_vad = max(self.tracking_vad_scores)
+                # VAD gating: check for voice DURING tracking OR in recent history
+                # Wake word model has ~200-300ms latency, so voice may have been
+                # detected before the wake score spiked
+                voice_frames_tracking = sum(1 for v in self.tracking_vad_scores if v > vad_threshold)
+                
+                # Check VAD history (lookback ~10 frames = 800ms before tracking)
+                vad_lookback = 10
+                recent_vad = list(self.vad_history)[-vad_lookback:] if self.vad_history else []
+                voice_frames_history = sum(1 for v in recent_vad if v)  # vad_history stores booleans
+                
+                has_voice = voice_frames_tracking > 0 or voice_frames_history > 0
+                max_vad_tracking = max(self.tracking_vad_scores) if self.tracking_vad_scores else 0
                 
                 wake_detected = False
                 detection_reason = ""
                 rejection_reason = ""
                 
+                # Build voice source info for logging
+                voice_source = []
+                if voice_frames_tracking > 0:
+                    voice_source.append(f"tracking:{voice_frames_tracking}")
+                if voice_frames_history > 0:
+                    voice_source.append(f"history:{voice_frames_history}/{vad_lookback}")
+                voice_info = "+".join(voice_source) if voice_source else "none"
+                
                 if not has_voice:
-                    # No voice activity - reject as noise spike
-                    rejection_reason = f"NO_VOICE (peak={peak_score:.3f}, max_vad={max_vad:.2f}<{vad_threshold})"
+                    # No voice activity in tracking or recent history - reject as noise spike
+                    rejection_reason = f"NO_VOICE (peak={peak_score:.3f}, max_vad={max_vad_tracking:.2f}<{vad_threshold}, history_voice={voice_frames_history}/{vad_lookback})"
                 elif peak_score >= self.confirm_peak and frames_above > 1:
                     # Traditional peak-based detection (with voice present)
                     wake_detected = True
-                    detection_reason = f"peak={peak_score:.3f}"
+                    detection_reason = f"peak={peak_score:.3f}, voice={voice_info}"
                 elif cumulative_score >= self.confirm_cumulative and frames_above >= self.min_frames_above_entry:
                     # Cumulative score detection (catches sustained moderate scores)
                     wake_detected = True
-                    detection_reason = f"cumul={cumulative_score:.2f}, frames={frames_above}"
+                    detection_reason = f"cumul={cumulative_score:.2f}, frames={frames_above}, voice={voice_info}"
                 else:
                     # Cluster rejected - build rejection reason for debugging
-                    rejection_reason = f"peak={peak_score:.3f}<{self.confirm_peak}, cumul={cumulative_score:.2f}<{self.confirm_cumulative}, frames={frames_above}"
+                    rejection_reason = f"peak={peak_score:.3f}<{self.confirm_peak}, cumul={cumulative_score:.2f}<{self.confirm_cumulative}, frames={frames_above}, voice={voice_info}"
                 
                 # Reset tracking state (save scores before clearing)
                 tracking_duration_ms = (time.time() - self.tracking_start_time) * 1000
