@@ -140,6 +140,13 @@ class WakeWordDetector:
         self.confirm_cumulative = cfg.get_config("WAKE_CONFIRM_CUMULATIVE") or 1.2
         self.min_frames_above_entry = int(cfg.get_config("WAKE_MIN_FRAMES_ABOVE_ENTRY") or 2)
         self.cooldown_frames = int(cfg.get_config("WAKE_COOLDOWN_FRAMES") or 5)
+        
+        # --- Continuous speech rejection thresholds
+        # When wake word is detected in the middle of ongoing speech (not isolated utterance),
+        # it's contextually unlikely to be intentional - real wake words are typically spoken
+        # after a pause, not mid-conversation. Require very high confidence to override context.
+        self.continuous_speech_max_ms = float(cfg.get_config("WAKE_CONTINUOUS_SPEECH_MAX_MS") or 1500.0)
+        self.continuous_speech_peak = float(cfg.get_config("WAKE_CONTINUOUS_SPEECH_PEAK") or 0.88)
 
         # --- Auto-noise manager
         noise_target = cfg.get_config("NOISE_TARGET_FLOOR") or 120.0
@@ -216,7 +223,9 @@ class WakeWordDetector:
             f"min_frames={self.min_frames_above_entry}, "
             f"cooldown={self.cooldown_frames}, "
             f"noise_floor={noise_stats['target_floor']}, "
-            f"noise_max={noise_stats['max_injection']}"
+            f"noise_max={noise_stats['max_injection']}, "
+            f"cont_speech_max={self.continuous_speech_max_ms}ms, "
+            f"cont_speech_peak={self.continuous_speech_peak}"
         )
         print(config_info)
         trace("wake", config_info)
@@ -418,23 +427,54 @@ class WakeWordDetector:
                     voice_source.append(f"history:{voice_frames_history}/{vad_lookback}")
                 voice_info = "+".join(voice_source) if voice_source else "none"
                 
+                # Calculate continuous voice duration before tracking started
+                # This detects if wake word appeared in middle of ongoing conversation
+                history = list(self.frame_history)
+                num_tracking_frames = len(self.tracking_scores)
+                continuous_voice_before_ms = 0
+                if len(history) > num_tracking_frames:
+                    # Count consecutive voice frames before tracking started
+                    pre_tracking_history = history[:-num_tracking_frames] if num_tracking_frames > 0 else history
+                    continuous_voice_frames = 0
+                    for f in reversed(pre_tracking_history):
+                        if f['vad'] >= vad_threshold:
+                            continuous_voice_frames += 1
+                        else:
+                            break
+                    continuous_voice_before_ms = continuous_voice_frames * 80  # 80ms per frame
+                
+                # Determine required peak based on speech context
+                # If wake word appears mid-conversation, require higher confidence
+                in_continuous_speech = continuous_voice_before_ms > self.continuous_speech_max_ms
+                required_peak = self.continuous_speech_peak if in_continuous_speech else self.confirm_peak
+                
                 if not has_voice:
                     # No voice activity in tracking or recent history - reject as noise spike
                     rejection_reason = f"NO_VOICE (peak={peak_score:.3f}, max_vad={max_vad_tracking:.2f}<{vad_threshold}, history_voice={voice_frames_history}/{vad_lookback})"
                 elif not has_strong_voice:
                     # Voice present but never peaked high enough - likely background speech not directed at device
                     rejection_reason = f"WEAK_VOICE (peak={peak_score:.3f}, max_vad_tracking={max_vad_tracking:.2f}, max_vad_history={max_vad_history:.2f}, combined={max_vad_combined:.2f}<{vad_peak_required:.2f})"
-                elif peak_score >= self.confirm_peak and frames_above > 1:
+                elif in_continuous_speech and peak_score < self.continuous_speech_peak:
+                    # Wake word detected in middle of ongoing speech - require higher peak to confirm
+                    # This reduces false positives from conversational speech
+                    rejection_reason = f"CONTINUOUS_SPEECH (peak={peak_score:.3f}<{self.continuous_speech_peak:.2f}, continuous_voice={continuous_voice_before_ms:.0f}ms>{self.continuous_speech_max_ms:.0f}ms)"
+                elif peak_score >= required_peak and frames_above > 1:
                     # Traditional peak-based detection (with voice present)
                     wake_detected = True
                     detection_reason = f"peak={peak_score:.3f}, voice={voice_info}"
+                    if in_continuous_speech:
+                        detection_reason += f", continuous={continuous_voice_before_ms:.0f}ms"
                 elif cumulative_score >= self.confirm_cumulative and frames_above >= self.min_frames_above_entry:
                     # Cumulative score detection (catches sustained moderate scores)
-                    wake_detected = True
-                    detection_reason = f"cumul={cumulative_score:.2f}, frames={frames_above}, voice={voice_info}"
+                    # Also apply continuous speech check for cumulative detection
+                    if in_continuous_speech:
+                        rejection_reason = f"CONTINUOUS_SPEECH (cumul={cumulative_score:.2f}, peak={peak_score:.3f}<{self.continuous_speech_peak:.2f}, continuous_voice={continuous_voice_before_ms:.0f}ms)"
+                    else:
+                        wake_detected = True
+                        detection_reason = f"cumul={cumulative_score:.2f}, frames={frames_above}, voice={voice_info}"
                 else:
                     # Cluster rejected - build rejection reason for debugging
-                    rejection_reason = f"peak={peak_score:.3f}<{self.confirm_peak}, cumul={cumulative_score:.2f}<{self.confirm_cumulative}, frames={frames_above}, voice={voice_info}"
+                    rejection_reason = f"peak={peak_score:.3f}<{required_peak}, cumul={cumulative_score:.2f}<{self.confirm_cumulative}, frames={frames_above}, voice={voice_info}"
                 
                 # Reset tracking state (save scores before clearing)
                 tracking_duration_ms = (time.time() - self.tracking_start_time) * 1000
