@@ -2,6 +2,7 @@
 # Finley 2025
 
 import asyncio
+import sys
 import time
 import numpy as np
 from chatty_async_manager import AsyncManager
@@ -147,6 +148,20 @@ class WakeWordDetector:
         # after a pause, not mid-conversation. Require very high confidence to override context.
         self.continuous_speech_max_ms = float(cfg.get_config("WAKE_CONTINUOUS_SPEECH_MAX_MS") or 1500.0)
         self.continuous_speech_peak = float(cfg.get_config("WAKE_CONTINUOUS_SPEECH_PEAK") or 0.88)
+        
+        # --- Stale voice rejection: sub-threshold overlap check
+        # When voice is only detected in lookback history (not during tracking),
+        # check for temporal co-occurrence of VAD and wake signals. In a real wake word,
+        # the decaying voice tail overlaps with the rising wake score. No overlap = stale voice.
+        self.overlap_vad_min = float(cfg.get_config("WAKE_OVERLAP_VAD_MIN") or 0.18)
+        self.overlap_wake_min = float(cfg.get_config("WAKE_OVERLAP_WAKE_MIN") or 0.05)
+        self.overlap_lookback_frames = int(cfg.get_config("WAKE_OVERLAP_LOOKBACK_FRAMES") or 8)
+
+        # --- Platform-specific detection mode
+        # On macOS, VAD and wake word model have timing desync (~300-500ms latency difference)
+        # that causes STALE_VOICE and WEAK_VOICE checks to fail on legitimate wake words.
+        # Use simplified detection on Mac: trust high peak scores with voice-in-history only.
+        self.is_macos = sys.platform == 'darwin'
 
         # --- Auto-noise manager
         noise_target = cfg.get_config("NOISE_TARGET_FLOOR") or 120.0
@@ -175,9 +190,10 @@ class WakeWordDetector:
                     self.master_state.add_log_for_next_summary(f"OpenWakeWord exception loading {wake_word_file}: {e}")
                     pass
             if oww:
-                print("OpenWakeWord model loaded")
-                self.master_state.add_log_for_next_summary(f"Wake word model loaded: {wake_word_file}")
-                trace("wake", f"model loaded: {wake_word_file}")
+                detection_mode = "macOS (simplified)" if self.is_macos else "Linux/Pi (full VAD gating)"
+                print(f"OpenWakeWord model loaded - detection mode: {detection_mode}")
+                self.master_state.add_log_for_next_summary(f"Wake word model loaded: {wake_word_file} ({detection_mode})")
+                trace("wake", f"model loaded: {wake_word_file}, mode: {detection_mode}")
                 self.model = oww
             else:
                 print("Failed to load OpenWakeWord model")
@@ -448,12 +464,34 @@ class WakeWordDetector:
                 in_continuous_speech = continuous_voice_before_ms > self.continuous_speech_max_ms
                 required_peak = self.continuous_speech_peak if in_continuous_speech else self.confirm_peak
                 
+                # Check for sub-threshold overlap between VAD and wake signals.
+                # In a real wake word, the decaying voice tail overlaps with the rising
+                # wake score (due to ~200-400ms model latency). If there's zero overlap,
+                # voice and wake are temporally disjoint = stale/unrelated voice.
+                has_overlap = False
+                if voice_frames_tracking == 0:
+                    overlap_start = max(0, len(history) - num_tracking_frames - self.overlap_lookback_frames)
+                    overlap_window = history[overlap_start:]
+                    for f in overlap_window:
+                        if f['vad'] >= self.overlap_vad_min and f['wake'] >= self.overlap_wake_min:
+                            has_overlap = True
+                            break
+                else:
+                    # Voice during tracking = direct temporal overlap
+                    has_overlap = True
+                
                 if not has_voice:
                     # No voice activity in tracking or recent history - reject as noise spike
                     rejection_reason = f"NO_VOICE (peak={peak_score:.3f}, max_vad={max_vad_tracking:.2f}<{vad_threshold}, history_voice={voice_frames_history}/{vad_lookback})"
-                elif not has_strong_voice:
+                elif not self.is_macos and not has_strong_voice:
                     # Voice present but never peaked high enough - likely background speech not directed at device
+                    # Skip on macOS: VAD timing desync causes false rejections with legitimate wake words
                     rejection_reason = f"WEAK_VOICE (peak={peak_score:.3f}, max_vad_tracking={max_vad_tracking:.2f}, max_vad_history={max_vad_history:.2f}, combined={max_vad_combined:.2f}<{vad_peak_required:.2f})"
+                elif not self.is_macos and voice_frames_tracking == 0 and not has_overlap:
+                    # Voice only in history with no sub-threshold overlap between VAD and wake signals.
+                    # The voice and wake events are temporally disjoint - the voice was unrelated.
+                    # Skip on macOS: VAD and wake model have ~300-500ms timing offset causing false rejections
+                    rejection_reason = f"STALE_VOICE (peak={peak_score:.3f}, no overlap vad>={self.overlap_vad_min}&wake>={self.overlap_wake_min}, voice only in history={voice_info})"
                 elif in_continuous_speech and peak_score < self.continuous_speech_peak:
                     # Wake word detected in middle of ongoing speech - require higher peak to confirm
                     # This reduces false positives from conversational speech
@@ -680,6 +718,19 @@ async def mic_listener(manager: AsyncManager) -> None:
 
     # Start the stream
     stream.start_stream()
+
+    # On macOS, print the active mic device for local dev visibility
+    import platform
+    if platform.system().lower() == 'darwin':
+        try:
+            dev_info = manager.master_state.pa.get_default_input_device_info()
+            dev_name = dev_info.get('name', 'unknown')
+            dev_rate = int(dev_info.get('defaultSampleRate', 0))
+            dev_channels = dev_info.get('maxInputChannels', 0)
+            print(f"🎤 Mic: {dev_name} ({dev_rate}Hz, {dev_channels}ch)")
+        except Exception:
+            pass
+
     trace("mic", "stream opened")
 
     try:

@@ -98,13 +98,24 @@ Get Chatty Friend running in QA/test mode on mac quickly:
    python chatty_friend.py
    ```
 
-4. **Simulate wake word** - Press `w` to wake up Chatty
-   wake word detection only works in headless mode on raspberry Pi where there is a lot of control over audio and system resources.
-   On Mac, use keboard "push to talk" with the space bar to simulate VAD, and use W key to simulate wake word detection.
-   This also allows for fast interactive prompt development as you don't have to go through the sleep/supervise cycle to iterate.
-   NOTE: I have not adapted the OpenWakeWord handling to work on platforms other than the raspberry Pi, but in theory it should work.  be sure to run init_oww_models.py to load all the models it expects for voice detection etc.
+4. **Wake word or keyboard activation**
+   - **Raspberry Pi**: Full wake word detection with VAD gating for robust false positive rejection
+   - **macOS**: Wake word detection is supported with a simplified algorithm. Uses peak threshold detection with voice-in-history check (skips VAD timing checks that don't work well on Mac due to audio pipeline differences)
+   
+   **macOS wake word requirements**: Use an audio device with input/output isolation:
+   - Headphones with integrated mic (audio isolation via headphones)
+   - Speakerphone device with half-duplex or echo cancellation
+   - External mic positioned away from speakers
+   
+   Without isolation, the assistant's output audio can trigger false wake detections.
+   
+   **Keyboard shortcuts** (available on all platforms for development):
+   - Press `w` to simulate wake word detection
+   - Hold `space` for push-to-talk (simulates VAD)
+   
+   Run `init_oww_models.py` first to download the OpenWakeWord models.
 
-5. **Talk to Chatty** - Hold `space` and speak (push-to-talk mode)
+5. **Talk to Chatty** - Hold `space` and speak (push-to-talk mode), or just speak after wake word
 
 6. **Have a conversation!** 🎉
 

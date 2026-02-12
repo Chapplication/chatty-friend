@@ -115,6 +115,9 @@ class SimulatorConfig:
     continuous_speech_max_ms: float = 1500.0
     continuous_speech_peak: float = 0.88
     vad_lookback: int = 10
+    overlap_vad_min: float = 0.18
+    overlap_wake_min: float = 0.05
+    overlap_lookback_frames: int = 8
     
     @classmethod
     def from_dict(cls, d: dict) -> 'SimulatorConfig':
@@ -284,6 +287,22 @@ class WakeDetectionSimulator:
         in_continuous_speech = continuous_voice_before_ms > cfg.continuous_speech_max_ms
         required_peak = cfg.continuous_speech_peak if in_continuous_speech else cfg.confirm_peak
         
+        # Check for sub-threshold overlap between VAD and wake signals
+        # In a real wake word, the decaying voice tail overlaps with the rising wake score.
+        # If there's NO overlap, voice and wake are temporally disjoint (stale voice).
+        has_overlap = False
+        if voice_frames_tracking == 0:
+            # Check frames in tracking window + lookback for any co-occurrence
+            overlap_start = max(0, len(history) - num_tracking_frames - cfg.overlap_lookback_frames)
+            overlap_window = history[overlap_start:]
+            for f in overlap_window:
+                if f['vad'] >= cfg.overlap_vad_min and f['wake'] >= cfg.overlap_wake_min:
+                    has_overlap = True
+                    break
+        else:
+            # Voice during tracking = direct temporal overlap
+            has_overlap = True
+        
         # Build result
         result = DetectionResult(
             outcome='reject',
@@ -303,6 +322,9 @@ class WakeDetectionSimulator:
         elif not has_strong_voice:
             result.reason = 'WEAK_VOICE'
             result.details = f"peak={peak_score:.3f}, max_vad_combined={max_vad_combined:.2f}<{vad_peak_required:.2f}"
+        elif voice_frames_tracking == 0 and not has_overlap:
+            result.reason = 'STALE_VOICE'
+            result.details = f"peak={peak_score:.3f}, no sub-threshold overlap (vad>={cfg.overlap_vad_min} & wake>={cfg.overlap_wake_min}), voice only in history"
         elif in_continuous_speech and peak_score < cfg.continuous_speech_peak:
             result.reason = 'CONTINUOUS_SPEECH'
             result.details = f"peak={peak_score:.3f}<{cfg.continuous_speech_peak:.2f}, continuous={continuous_voice_before_ms:.0f}ms"

@@ -228,7 +228,6 @@ important information about the user's living situation, mood, etc.
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {
     "REALTIME_MODEL" : "gpt-realtime-mini",
-    "AUDIO_TRANSCRIPTION_MODEL" : "gpt-4o-mini-transcribe",
     "EMBEDDING_MODEL" : "text-embedding-3-small",
     "SUPERVISOR_MODEL" : "gpt-5-mini",
     "WS_URL" : 'wss://api.openai.com/v1/realtime?model=',

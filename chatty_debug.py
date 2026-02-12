@@ -7,12 +7,17 @@
 
 import asyncio
 import json
+import platform
 from collections import deque
 from datetime import datetime
 from typing import Optional
 
 # Global server instance
 _server: Optional['DebugLogServer'] = None
+
+# On macOS, also dump trace output to the console since there's typically
+# no TCP debug client connected during local development.
+_console_trace: bool = platform.system().lower() == 'darwin'
 
 
 class DebugLogServer:
@@ -229,6 +234,7 @@ def trace(component: str, msg: str):
     
     Never blocks, never raises. Safe to call from anywhere.
     If no server is running or queue is full, the log is silently dropped.
+    On macOS, also prints to console for local development convenience.
     
     Args:
         component: Short identifier (e.g., "mic", "ws", "spkr")
@@ -239,6 +245,9 @@ def trace(component: str, msg: str):
         trace("ws", f"session created id={session_id}")
     """
     try:
+        if _console_trace:
+            ts = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+            print(f"[{ts}] {component:>6}: {msg}")
         if _server is not None:
             _server.post(component, msg)
     except:

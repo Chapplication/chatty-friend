@@ -615,13 +615,11 @@ else:  # we have wifi and authentication!
                     return False, "Please enter both SSID and password"
             elif section_id == 'ai':
                 realtime_model = st.session_state.get('realtime_model', '').strip()
-                transcription_model = st.session_state.get('transcription_model', '').strip()
                 supervisor_model = st.session_state.get('supervisor_model', '').strip()
                 ws_url = st.session_state.get('ws_url', '').strip()
-                if realtime_model and transcription_model and ws_url:
+                if realtime_model and ws_url:
                     config_updates.update({
                         'REALTIME_MODEL': realtime_model,
-                        'AUDIO_TRANSCRIPTION_MODEL': transcription_model,
                         'SUPERVISOR_MODEL': supervisor_model,
                         'WS_URL': ws_url
                     })
@@ -703,7 +701,7 @@ else:  # we have wifi and authentication!
                         'password': ['new_password', 'confirm_password', 'password_hint'],
                         'wifi': ['new_wifi_ssid', 'new_wifi_password'],
                         'remote_config': ['supabase_email', 'supabase_password', 'device_name', 'device_location', 'device_passphrase', 'selected_device_id'],
-                        'ai': ['realtime_model', 'transcription_model', 'supervisor_model', 'ws_url'],
+                        'ai': ['realtime_model', 'supervisor_model', 'ws_url'],
                         'personality': ['system_prompt', 'selected_voice', 'volume_setting', 'speed_setting', 'eagerness_setting'],
                         'content': ['news_provider'],
                         'voice_tech': ['vad_threshold', 'wake_word_threshold', 'voice_wait_time'],
@@ -755,7 +753,7 @@ else:  # we have wifi and authentication!
                     'password': ['new_password', 'confirm_password', 'password_hint'],
                     'wifi': ['new_wifi_ssid', 'new_wifi_password'],
                     'remote_config': ['supabase_email', 'supabase_password', 'device_name', 'device_location', 'device_passphrase', 'selected_device_id'],
-                    'ai': ['realtime_model', 'transcription_model', 'supervisor_model', 'ws_url'],
+                    'ai': ['realtime_model', 'supervisor_model', 'ws_url'],
                     'personality': ['system_prompt', 'selected_voice', 'volume_setting', 'speed_setting', 'eagerness_setting'],
                     'content': ['news_provider'],
                     'voice_tech': ['vad_threshold', 'wake_word_threshold', 'voice_wait_time'],
@@ -1420,12 +1418,6 @@ else:  # we have wifi and authentication!
                 key="realtime_model"
             )
             
-            transcription_model = st.text_input(
-                "Audio Transcription Model",
-                value=st.session_state.config_manager.get_config('AUDIO_TRANSCRIPTION_MODEL') or default_config['AUDIO_TRANSCRIPTION_MODEL'],
-                key="transcription_model"
-            )
-            
             supervisor_model = st.text_input(
                 "Supervisor Model",
                 value=st.session_state.config_manager.get_config('SUPERVISOR_MODEL') or default_config['SUPERVISOR_MODEL'],
@@ -1439,10 +1431,9 @@ else:  # we have wifi and authentication!
             )
             
             if st.form_submit_button("💾 Save AI Settings", type="primary"):
-                if realtime_model.strip() and transcription_model.strip() and ws_url.strip():
+                if realtime_model.strip() and ws_url.strip():
                     success, message = st.session_state.config_manager.save_config({
                         'REALTIME_MODEL': realtime_model.strip(),
-                        'AUDIO_TRANSCRIPTION_MODEL': transcription_model.strip(),
                         'SUPERVISOR_MODEL': supervisor_model.strip(),
                         'WS_URL': ws_url.strip()
                     })

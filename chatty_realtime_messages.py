@@ -11,7 +11,6 @@ from chatty_debug import trace
 import time
 import asyncio
 import jinja2
-import pprint
 #
 #  OUTGOING MESSAGES TO ASSISTANT
 #
@@ -40,43 +39,6 @@ def get_speed_from_percentage_int_0_to_100(speed):
         return max(0.25, min(1.5, 0.25+(float(speed) * 1.25) / 100.0))
     except:
         return 1.0
-
-def build_transcription_prompt(master_state):
-    """Build transcription prompt from user profile vocabulary"""
-    prompt_parts = []
-    
-    # Extract names from contacts
-    contacts = master_state.conman.get_config("CONTACTS") or []
-    if contacts:
-        names = [contact.get("name", "").strip() for contact in contacts if contact.get("name")]
-        if names:
-            prompt_parts.append("Common names: " + ", ".join(names))
-    
-    # Extract user name
-    user_name = master_state.conman.get_config("USER_NAME")
-    if user_name and user_name != "User":
-        prompt_parts.append(f"User's name: {user_name}")
-    
-    # Extract wake word name
-    wake_word = master_state.conman.get_config("WAKE_WORD_MODEL")
-    if wake_word:
-        prompt_parts.append(f"Assistant's name: {wake_word}")
-    
-    # Extract key terms from user profile
-    user_profile = master_state.conman.get_config("USER_PROFILE") or []
-    if user_profile:
-        # Look for common proper nouns and important terms
-        profile_text = " ".join([str(entry) for entry in user_profile if isinstance(entry, str)])
-        # Extract potential names/places (simple heuristic: capitalized words)
-        import re
-        capitalized_words = set(re.findall(r'\b[A-Z][a-z]+\b', profile_text))
-        if capitalized_words:
-            # Limit to reasonable number to avoid prompt bloat
-            important_terms = list(capitalized_words)[:20]
-            if important_terms:
-                prompt_parts.append("Important terms: " + ", ".join(important_terms))
-    
-    return ". ".join(prompt_parts) if prompt_parts else ""
 
 #
 #   SETUP realtime connection
@@ -171,10 +133,6 @@ async def setup_assistant_session(master_state, greet_user: str = None):
                             "rate": NATIVE_OAI_SAMPLE_RATE_HZ
                         },
                         "noise_reduction": {"type":"far_field"},
-                        "transcription": {
-                            "model": master_state.conman.get_config("AUDIO_TRANSCRIPTION_MODEL"),
-                            "prompt": build_transcription_prompt(master_state)
-                            },
                         "turn_detection": {
                             "create_response": True,
                             #"eagerness": "high" if etr_ms <= 200 else "auto" if etr_ms <= 800 else "low",
@@ -292,8 +250,9 @@ async def assistant_session_cancel_audio(master_state):
 #
 
 async def on_assistant_response_done(event, master_state):
-    """ Digest events to collect usage and estimate costs. """
+    """ Digest events to collect usage, estimate costs, and handle OOB transcription. """
 
+    # --- Track usage for ALL responses (main + OOB transcription) ---
     try:
         usage = event.get("response",{}).get("usage",{})
 
@@ -322,14 +281,171 @@ async def on_assistant_response_done(event, master_state):
     except Exception as e:
         print(f"❌ Error accumulating usage: {e}")
 
-async def on_transcript_event(event, master_state):
-    """ Track the transcript of the conversation. """
-    event_type = event["type"]
-    if event_type == 'response.output_audio_transcript.done':
-        await master_state.add_to_transcript("AI", event['transcript'])
+    # --- Check if this is an OOB transcription response (text-only, no audio) ---
+    # OOB transcription responses are the only text-only responses in the system.
+    # All other responses (main assistant, system text, function follow-ups) include audio.
+    try:
+        transcription_text = extract_transcription_text(event)
+        if transcription_text is not None:
+            if transcription_text:
+                await master_state.add_to_transcript("user", transcription_text)
+            else:
+                await master_state.add_to_transcript("user", "[transcription unavailable]")
+    except Exception as e:
+        print(f"❌ Error processing OOB transcription: {e}")
+        await master_state.add_to_transcript("user", "[transcription unavailable]")
 
-    elif event_type == 'conversation.item.input_audio_transcription.completed':
-        await master_state.add_to_transcript("user", event['transcript'])
+async def on_assistant_transcript(event, master_state):
+    """ Track the assistant's own speech as text in the transcript. """
+    await master_state.add_to_transcript("AI", event['transcript'])
+
+
+#
+#  OUT-OF-BAND (OOB) TRANSCRIPTION
+#
+#  Instead of relying on the built-in input_audio_transcription (which uses a separate
+#  ASR model that frequently produces truncated, foreign-language, or nonsense text),
+#  we ask the same Realtime model to transcribe the user's speech via a second
+#  response.create request on the same WebSocket. This gives accurate, context-aware
+#  transcription because the model that understood the audio is the one producing the text.
+#
+
+def build_oob_transcription_instructions(master_state):
+    """Build instructions for the out-of-band transcription request.
+    
+    Kept minimal because with full session context the model already knows the
+    user's name, conversation topic, vocabulary, etc.  The instructions are
+    emphatic about the role to prevent the model from generating a conversational
+    response instead of transcribing.
+    """
+    instructions = (
+        "You are a speech-to-text transcriber, NOT a conversational assistant. "
+        "Your ONLY job is to transcribe the user's most recent speech turn into text. "
+        "Output ONLY the verbatim transcription of what the user said — nothing else. "
+        "Do NOT respond to the user. Do NOT continue the conversation. "
+        "Do NOT add commentary, questions, or any text that the user did not speak. "
+        "Do NOT wrap the output in JSON or any other format."
+    )
+
+    language = master_state.conman.get_config("LANGUAGE")
+    if language:
+        instructions += f" The user speaks {language}."
+
+    return instructions
+
+
+async def request_oob_transcription(master_state):
+    """Fire an out-of-band text-only response to transcribe the user's last turn.
+    
+    The response uses conversation="none" so it does not write back to the
+    conversation state.  Without an explicit "input" field the model sees the
+    full session context (instructions + all prior turns) for best grounding.
+    """
+
+    # COST REDUCTION: This currently uses full session context (~16-22x the cost of
+    # the old built-in transcription) because no "input" field is specified, so the
+    # model sees the entire conversation history for best grounding.
+    #
+    # To reduce to ~3-5x cost, add an "input" field referencing only the latest
+    # committed audio item (pass committed_item_id from the input_audio_buffer.committed
+    # event into this function):
+    #
+    #   "input": [{"type": "item_reference", "id": committed_item_id}]
+    #
+    # This limits the model to just the latest user audio turn, losing session
+    # context grounding but significantly reducing token consumption.
+    #
+    # A middle ground: include a text summary of recent turns in the instructions
+    # field while using the item_reference input, getting partial grounding at
+    # moderate cost.
+
+    await send_to_assistant(master_state.ws, {
+        "type": "response.create",
+        "response": {
+            "conversation": "none",
+            "output_modalities": ["text"],
+            "instructions": build_oob_transcription_instructions(master_state),
+            "max_output_tokens": 4096,
+            "tool_choice": "none"
+        }
+    })
+
+
+async def on_audio_buffer_committed(event, master_state):
+    """Handle the server committing the user's audio buffer (end of user turn).
+    
+    Fires an out-of-band transcription request so the Realtime model produces
+    an accurate text transcript of what the user just said.
+    """
+    # event contains "item_id" — the conversation item for the committed audio.
+    # Stored here for potential future cost reduction (see request_oob_transcription).
+    # committed_item_id = event.get("item_id")
+
+    await request_oob_transcription(master_state)
+
+
+def extract_transcription_text(event):
+    """Extract text from a response.done event's output items.
+    
+    Returns the concatenated text if the response contains only text output
+    (no audio), indicating it is an OOB transcription response. Returns None
+    if the response contains audio output (i.e. a normal assistant response)
+    or if the output contains function calls rather than message content.
+    
+    The Realtime API uses content types "output_text" and "output_audio"
+    (not "text" and "audio").
+    """
+    response = event.get("response", {})
+    output_items = response.get("output", [])
+
+    if not output_items:
+        return None
+
+    has_audio = False
+    text_parts = []
+
+    for item in output_items:
+        # Skip function call outputs — only look at message items
+        if item.get("type") != "message":
+            return None
+        for part in item.get("content", []):
+            content_type = part.get("type", "")
+            if content_type in ("audio", "output_audio"):
+                has_audio = True
+            elif content_type in ("text", "output_text"):
+                text_parts.append(part.get("text", ""))
+
+    # Only treat as transcription if there is text and no audio
+    if text_parts and not has_audio:
+        raw = "".join(text_parts).strip()
+        return _unwrap_transcription_json(raw)
+
+    return None
+
+
+def _unwrap_transcription_json(text):
+    """Unwrap transcription text if the model returned it wrapped in JSON.
+    
+    The OOB model sometimes returns structured output like:
+      {"transcription": "actual text here"}
+    This extracts the inner text. If the text is already plain, returns as-is.
+    """
+    if not text or not text.startswith("{"):
+        return text
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            # Try common keys the model might use
+            for key in ("transcription", "transcript", "text"):
+                if key in parsed:
+                    return str(parsed[key]).strip()
+            # If it's a dict with a single string value, use that
+            values = [v for v in parsed.values() if isinstance(v, str)]
+            if len(values) == 1:
+                return values[0].strip()
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return text
 
 async def on_assistant_error(event, master_state):
     """ diagnostic... look at errors """
@@ -408,10 +524,10 @@ assistant_event_handlers = {
     "response.output_audio.done": on_assistant_audio,
     "error": on_assistant_error,
     "response.done": on_assistant_response_done,
-    "conversation.item.input_audio_transcription.completed": on_transcript_event,
-    "response.output_audio_transcript.done": on_transcript_event,
+    "response.output_audio_transcript.done": on_assistant_transcript,
     "response.function_call_arguments.done": on_function_call_arguments_done,
     "input_audio_buffer.speech_started": on_speech_started,
+    "input_audio_buffer.committed": on_audio_buffer_committed,
 }
 
 async def on_assistant_input_event(event_raw, master_state):
