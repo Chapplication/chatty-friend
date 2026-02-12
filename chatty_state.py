@@ -6,6 +6,7 @@ import pyaudio
 from chatty_tools import load_tool_config
 from chatty_secrets import SecretsManager
 from chatty_config import ConfigManager, ASSISTANT_GO_TO_SLEEP, SPEAKER_PLAY_TONE, CHATTY_SONG_SLEEP, OPENAI_SESSION_HARD_LIMIT_SECONDS, EMBEDDED_PHRASES
+import asyncio
 import platform
 import time
 from chatty_supervisor import report_conversation_to_supervisor
@@ -265,13 +266,25 @@ class ChattyMasterState:
         print(f"🔄 {role}: {content}")
         await self.check_auto_summarize_n_messages()
 
-        # assistant is reluctant to react to "go to sleep" etc. so force embeddinging check
+        # assistant is reluctant to react to "go to sleep" etc. so force embedding check
+        # as a FALLBACK.  We delay the check to give the assistant time to handle the
+        # command via tool call first (e.g. GoToSleepTool with action="upgrade").
+        # If the assistant already dismissed by the time we check, we skip.
         if role == "user":
-            embedding_match = self.semantic_matcher.match(content, thresh=0.5)
-            if embedding_match:
-                # only one embedding match action for now... expand as needed
-                if embedding_match[0] in EMBEDDED_PHRASES:
-                    self.dismiss_assistant()
+            asyncio.get_event_loop().call_later(
+                5.0, self._deferred_embedding_check, content
+            )
+
+    def _deferred_embedding_check(self, content):
+        """Run embedding match after a delay, but only if the assistant hasn't already
+        handled the command via a tool call (e.g. GoToSleepTool).  This makes the
+        embedding check a true fallback rather than a race with the tool path."""
+        if self.should_quit or self.should_upgrade or self.should_reset_session:
+            return  # assistant already handled it
+        embedding_match = self.semantic_matcher.match(content, thresh=0.5)
+        if embedding_match:
+            if embedding_match[0] in EMBEDDED_PHRASES:
+                self.dismiss_assistant()
 
     def accumulate_usage(self, cost):
         self.usage_history.append({"cost":cost})
