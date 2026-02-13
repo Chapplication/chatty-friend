@@ -246,6 +246,9 @@ default_config = {
     "WAKE_CONFIRM_CUMULATIVE" : 1.2,      # OR confirm if cumulative score exceeds this
     "WAKE_MIN_FRAMES_ABOVE_ENTRY" : 2,    # Minimum frames above entry for cumulative
     "WAKE_COOLDOWN_FRAMES" : 5,           # Frames to wait after detection (~400ms)
+    # Near-miss chirp feedback
+    "NEAR_MISS_COOLDOWN_SECONDS" : 5.0,   # Minimum seconds between near-miss chirps
+    "NEAR_MISS_PEAK_RATIO" : 0.80,        # Chirp when peak >= this ratio of confirm threshold
     # Auto-noise injection
     "NOISE_TARGET_FLOOR" : 120.0,         # Target ambient noise floor RMS
     "NOISE_MAX_INJECTION" : 85.0,         # Maximum synthetic noise to inject
@@ -326,6 +329,7 @@ CHATTY_SONG_SLEEP = "SLEEP"
 CHATTY_SONG_AWAKE = "AWAKE"
 CHATTY_SONG_ERROR = "ERROR"
 CHATTY_SONG_TOOL_CALL = "TOOL_CALL"
+CHATTY_SONG_NEAR_MISS = "NEAR_MISS"
 
 chatty_songs = {
 CHATTY_SONG_STARTUP: [
@@ -368,6 +372,10 @@ CHATTY_SONG_TOOL_CALL: [
     (0, 20),     # pause
     (1320, 60),  # E6
     (1047, 80),  # C6
+],
+
+CHATTY_SONG_NEAR_MISS: [
+    (1800, 25),  # Quick subtle chirp - "almost got it"
 ]
 }
 

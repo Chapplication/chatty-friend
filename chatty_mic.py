@@ -8,6 +8,7 @@ import numpy as np
 from chatty_async_manager import AsyncManager
 import pyaudio
 from chatty_config import USER_SAID_WAKE_WORD, USER_STARTED_SPEAKING, ASSISTANT_GO_TO_SLEEP, MASTER_EXIT_EVENT, SAMPLE_RATE_HZ, AUDIO_BLOCKSIZE, ASSISTANT_RESUME_AFTER_AUTO_SUMMARY
+from chatty_config import SPEAKER_PLAY_TONE, CHATTY_SONG_NEAR_MISS
 from chatty_debug import trace
 
 try:
@@ -142,6 +143,12 @@ class WakeWordDetector:
         self.min_frames_above_entry = int(cfg.get_config("WAKE_MIN_FRAMES_ABOVE_ENTRY") or 2)
         self.cooldown_frames = int(cfg.get_config("WAKE_COOLDOWN_FRAMES") or 5)
         
+        # --- Near-miss chirp feedback
+        self.near_miss_peak_ratio = float(cfg.get_config("NEAR_MISS_PEAK_RATIO") or 0.80)
+        self.near_miss_cooldown_seconds = float(cfg.get_config("NEAR_MISS_COOLDOWN_SECONDS") or 5.0)
+        self.last_near_miss_time = 0
+        self.near_miss_chirp = False  # Flag consumed by mic_listener to emit tone
+        
         # --- Continuous speech rejection thresholds
         # When wake word is detected in the middle of ongoing speech (not isolated utterance),
         # it's contextually unlikely to be intentional - real wake words are typically spoken
@@ -241,7 +248,9 @@ class WakeWordDetector:
             f"noise_floor={noise_stats['target_floor']}, "
             f"noise_max={noise_stats['max_injection']}, "
             f"cont_speech_max={self.continuous_speech_max_ms}ms, "
-            f"cont_speech_peak={self.continuous_speech_peak}"
+            f"cont_speech_peak={self.continuous_speech_peak}, "
+            f"near_miss_ratio={self.near_miss_peak_ratio}, "
+            f"near_miss_cooldown={self.near_miss_cooldown_seconds}s"
         )
         print(config_info)
         trace("wake", config_info)
@@ -513,6 +522,19 @@ class WakeWordDetector:
                 else:
                     # Cluster rejected - build rejection reason for debugging
                     rejection_reason = f"peak={peak_score:.3f}<{required_peak}, cumul={cumulative_score:.2f}<{self.confirm_cumulative}, frames={frames_above}, voice={voice_info}"
+                    
+                    # Near-miss chirp: cluster passed all voice quality gates but
+                    # missed on score. If scores were close, chirp to let the user
+                    # know they almost triggered the wake word.
+                    near_miss_peak_thr = self.confirm_peak * self.near_miss_peak_ratio
+                    near_miss_cumul_thr = self.confirm_cumulative * self.near_miss_peak_ratio
+                    now_mono = self._monotonic_time()
+                    if (frames_above >= 2
+                            and (peak_score >= near_miss_peak_thr or cumulative_score >= near_miss_cumul_thr)
+                            and (now_mono - self.last_near_miss_time) >= self.near_miss_cooldown_seconds):
+                        self.near_miss_chirp = True
+                        self.last_near_miss_time = now_mono
+                        trace("wake", f"NEAR_MISS chirp - peak={peak_score:.3f}(thr={near_miss_peak_thr:.3f}), cumul={cumulative_score:.2f}(thr={near_miss_cumul_thr:.2f}), frames={frames_above}, voice={voice_info}")
                 
                 # Reset tracking state (save scores before clearing)
                 tracking_duration_ms = (time.time() - self.tracking_start_time) * 1000
@@ -654,7 +676,8 @@ class WakeWordDetector:
                     f"rms={raw_rms:.0f}, noise_inj={noise_level:.0f}{tracking_info}"
                 )
 
-        # --- 6. Cluster-based detection with VAD gating
+        # --- 7. Cluster-based detection with VAD gating
+        self.near_miss_chirp = False  # Reset before evaluation; set by _evaluate if near miss
         is_wake_word = self._evaluate_cluster_detection(max_score, vad_score, vad_threshold)
 
         return (is_voice, is_wake_word)
@@ -795,6 +818,15 @@ async def mic_listener(manager: AsyncManager) -> None:
                                     deadman -= 1
                             except:
                                 print("❌ Error flushing partial audio")
+                                pass
+                        elif wake_detector and wake_detector.near_miss_chirp:
+                            # Near miss - play a subtle chirp so user knows they're close
+                            wake_detector.near_miss_chirp = False
+                            try:
+                                manager.master_state.task_managers["speaker"].command_q.put_nowait(
+                                    SPEAKER_PLAY_TONE + ":" + CHATTY_SONG_NEAR_MISS
+                                )
+                            except Exception:
                                 pass
                         # we are asleep
                         continue

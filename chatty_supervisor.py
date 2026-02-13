@@ -7,7 +7,7 @@
 # - summaries
 
 import jinja2
-from chatty_config import get_current_date_string, CONTACT_TYPE_PRIMARY_SUPERVISOR
+from chatty_config import get_current_date_string, CONTACT_TYPE_PRIMARY_SUPERVISOR, CHATTY_FRIEND_VERSION_NUMBER
 from chatty_communications import chatty_send_email, chatty_send_sms
 import asyncio
 
@@ -173,11 +173,12 @@ def format_summary_email(master_state, responses):
     <body>
         <div class="container">
             <h1>Chatty Friend Conversation Summary</h1>
-            <p class="note">Generated on {date_time}</p>
+            <p class="note">Generated on {date_time} &middot; v{version}</p>
             <p>Hello, this is a summary of the most recent conversation with <strong>{user_name}</strong>.</p>
     """
 
     html_content = html_content.replace("{date_time}", get_current_date_string(with_time=True))
+    html_content = html_content.replace("{version}", CHATTY_FRIEND_VERSION_NUMBER)
     html_content = html_content.replace("{user_name}", master_state.conman.get_config("USER_NAME"))
 
     # Add escalation section if present
@@ -325,6 +326,7 @@ def format_summary_email(master_state, responses):
         print("NOLOGS")
 
     plain_text += f"\nTOTAL COST: ${total_cost:.2f}"
+    plain_text += f"\nChatty Friend v{CHATTY_FRIEND_VERSION_NUMBER}"
 
 
     return subject, html_content, plain_text

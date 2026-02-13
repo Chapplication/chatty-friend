@@ -321,10 +321,11 @@ def build_oob_transcription_instructions(master_state):
     instructions = (
         "You are a speech-to-text transcriber, NOT a conversational assistant. "
         "Your ONLY job is to transcribe the user's most recent speech turn into text. "
-        "Output ONLY the verbatim transcription of what the user said — nothing else. "
+        "Output EVERY word the user said, exactly as spoken, in full — do not "
+        "shorten, summarize, paraphrase, or reduce their speech to keywords. "
         "Do NOT respond to the user. Do NOT continue the conversation. "
         "Do NOT add commentary, questions, or any text that the user did not speak. "
-        "Do NOT wrap the output in JSON or any other format."
+        "Do NOT wrap the output in JSON, braces, or quotes — plain text only."
     )
 
     language = master_state.conman.get_config("LANGUAGE")
@@ -418,34 +419,48 @@ def extract_transcription_text(event):
     # Only treat as transcription if there is text and no audio
     if text_parts and not has_audio:
         raw = "".join(text_parts).strip()
-        return _unwrap_transcription_json(raw)
+        return _clean_transcription_text(raw)
 
     return None
 
 
-def _unwrap_transcription_json(text):
-    """Unwrap transcription text if the model returned it wrapped in JSON.
+def _clean_transcription_text(text):
+    """Clean up transcription text from OOB model quirks.
     
-    The OOB model sometimes returns structured output like:
-      {"transcription": "actual text here"}
+    The model sometimes:
+      - Wraps text in JSON:  {"transcription": "actual text here"}
+      - Wraps text in stray braces:  {"I'm doing alright."}
+      - Wraps text in quotes:  "I'm doing alright."
     This extracts the inner text. If the text is already plain, returns as-is.
     """
-    if not text or not text.startswith("{"):
+    if not text:
         return text
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            # Try common keys the model might use
-            for key in ("transcription", "transcript", "text"):
-                if key in parsed:
-                    return str(parsed[key]).strip()
-            # If it's a dict with a single string value, use that
-            values = [v for v in parsed.values() if isinstance(v, str)]
-            if len(values) == 1:
-                return values[0].strip()
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return text
+
+    # Try JSON unwrap first for proper key-value structures
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                # Try common keys the model might use
+                for key in ("transcription", "transcript", "text"):
+                    if key in parsed:
+                        return str(parsed[key]).strip()
+                # If it's a dict with a single string value, use that
+                values = [v for v in parsed.values() if isinstance(v, str)]
+                if len(values) == 1:
+                    return values[0].strip()
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Strip stray wrapping characters the model likes to add:
+    # {"text here"} or {text here} or "text here"
+    stripped = text
+    if stripped.startswith("{") and stripped.endswith("}"):
+        stripped = stripped[1:-1].strip()
+    if stripped.startswith('"') and stripped.endswith('"') and stripped.count('"') == 2:
+        stripped = stripped[1:-1].strip()
+
+    return stripped if stripped else text
 
 async def on_assistant_error(event, master_state):
     """ diagnostic... look at errors """
