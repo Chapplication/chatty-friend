@@ -13,8 +13,10 @@ from chatty_debug import trace
 
 try:
     from openwakeword.model import Model as OpenWakewordModel
+    from openwakeword.vad import VAD as SileroVAD
 except ImportError:
     OpenWakewordModel = None
+    SileroVAD = None
 
 
 #
@@ -178,6 +180,16 @@ class WakeWordDetector:
             max_injection=noise_max
         )
 
+        # --- Standalone VAD model (separate from wake word model to avoid
+        #     double-invocation of stateful LSTM and to use correct frame size)
+        self.vad = None
+        if SileroVAD:
+            try:
+                self.vad = SileroVAD()
+                print("Standalone Silero VAD loaded (frame_size=640)")
+            except Exception as e:
+                print(f"Failed to load standalone Silero VAD: {e}")
+
         # --- Load wake word model
         base_assistant_name = master_state.conman.get_wake_word_model()
         if OpenWakewordModel and base_assistant_name:
@@ -188,7 +200,7 @@ class WakeWordDetector:
                     print("Trying to load OpenWakeWord model: " + wake_word_file)
                     oww = OpenWakewordModel(
                         wakeword_models=[wake_word_file],
-                        vad_threshold=cfg.get_config("VAD_THRESHOLD"),
+                        vad_threshold=0,  # Disabled: using standalone VAD to avoid double LSTM invocation
                         inference_framework=extension,
                     )
                     break
@@ -595,7 +607,12 @@ class WakeWordDetector:
             return (is_voice, False)
 
         # --- 1. Get VAD score on raw audio first (before noise injection)
-        vad_score = self.model.vad.predict(audio_16ints)
+        #     Uses standalone Silero VAD with frame_size=640 (1280/640 = 2 clean chunks,
+        #     both above Silero's 512-sample minimum). Falls back to shared model VAD if standalone unavailable.
+        if self.vad is not None:
+            vad_score = self.vad.predict(audio_16ints, frame_size=640)
+        else:
+            vad_score = self.model.vad.predict(audio_16ints, frame_size=640)
         vad_threshold = self.master_state.conman.get_config("VAD_THRESHOLD")
         is_voice = vad_score > vad_threshold
         self.vad_history.append(is_voice)
