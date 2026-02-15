@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 import time
 from datetime import datetime
 
-CHATTY_FRIEND_VERSION_NUMBER = "0.1.14"
+CHATTY_FRIEND_VERSION_NUMBER = "0.1.15"
 
 def get_current_date_string(with_time=False):
 	return datetime.now().strftime("%Y-%m-%d" + (" %H:%M:%S" if with_time else ""))
