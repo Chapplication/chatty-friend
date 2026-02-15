@@ -1772,29 +1772,41 @@ else:  # we have wifi and authentication!
                     import os
                     script_dir = os.path.dirname(os.path.abspath(__file__))
                     
-                    # Run git pull
-                    result = subprocess.run(
-                        ['git', 'pull'],
+                    # Run as chatty user to avoid git dubious ownership error (Streamlit runs as root)
+                    # Use fetch + reset --hard to avoid conflicts from local file modifications on the Pi
+                    fetch_result = subprocess.run(
+                        ['sudo', '-u', 'chatty', 'git', 'fetch'],
                         cwd=script_dir,
                         capture_output=True,
                         text=True,
                         timeout=60
                     )
                     
-                    if result.returncode == 0:
-                        st.success(f"Git pull successful:\n```\n{result.stdout}\n```")
-                        st.warning("Restarting voice assistant service...")
-                        time.sleep(1)
-                        
-                        # Restart the chatty service (not the whole system)
-                        if not TESTING_PI_UI_MOCK_SYSTEM_CALLS:
-                            subprocess.run(['sudo', 'systemctl', 'restart', 'start_chatty.service'], check=False)
-                        
-                        st.success("Service restart initiated. The voice assistant will be back online shortly.")
+                    if fetch_result.returncode != 0:
+                        st.error(f"Git fetch failed:\n```\n{fetch_result.stderr}\n```")
                     else:
-                        st.error(f"Git pull failed:\n```\n{result.stderr}\n```")
+                        result = subprocess.run(
+                            ['sudo', '-u', 'chatty', 'git', 'reset', '--hard', 'origin/main'],
+                            cwd=script_dir,
+                            capture_output=True,
+                            text=True,
+                            timeout=60
+                        )
+                        
+                        if result.returncode == 0:
+                            st.success(f"Upgrade successful:\n```\n{result.stdout}\n```")
+                            st.warning("Restarting voice assistant service...")
+                            time.sleep(1)
+                            
+                            # Restart the chatty service (not the whole system)
+                            if not TESTING_PI_UI_MOCK_SYSTEM_CALLS:
+                                subprocess.run(['sudo', 'systemctl', 'restart', 'start_chatty.service'], check=False)
+                            
+                            st.success("Service restart initiated. The voice assistant will be back online shortly.")
+                        else:
+                            st.error(f"Git reset failed:\n```\n{result.stderr}\n```")
                 except subprocess.TimeoutExpired:
-                    st.error("Git pull timed out. Check network connection.")
+                    st.error("Git upgrade timed out. Check network connection.")
                 except Exception as e:
                     st.error(f"Upgrade failed: {str(e)}")
         

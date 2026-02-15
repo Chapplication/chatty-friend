@@ -11,7 +11,7 @@ class GoToSleepTool(LLMTool):
     def __init__(self, master_state):
         action = LLMToolParameter("action","which of the available actions is the user requesting", enum=["exit", "sleep", "bye", "upgrade"], required=True)
 
-        super().__init__("sleep_or_bye_tool", 
+        super().__init__("assistant_control_tool", 
                          description,
                          [action], 
                          master_state)

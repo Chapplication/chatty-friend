@@ -54,8 +54,3 @@ chatty_push.sh
 # Personal documentation
 CLAUDE.md
 TODO.md
-
-# Local-only files
-last_web_activity.json
-docs/wake-word-testing.md
-.gitignore
