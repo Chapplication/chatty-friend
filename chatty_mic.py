@@ -485,21 +485,25 @@ class WakeWordDetector:
                 in_continuous_speech = continuous_voice_before_ms > self.continuous_speech_max_ms
                 required_peak = self.continuous_speech_peak if in_continuous_speech else self.confirm_peak
                 
-                # Check for sub-threshold overlap between VAD and wake signals.
-                # In a real wake word, the decaying voice tail overlaps with the rising
-                # wake score (due to ~200-400ms model latency). If there's zero overlap,
-                # voice and wake are temporally disjoint = stale/unrelated voice.
-                has_overlap = False
+                # Check for voice proximity to wake onset.
+                # With accurate VAD, voice and wake scores are temporally disjoint:
+                # voice peaks and decays BEFORE the wake model fires (~300-600ms latency).
+                # Instead of requiring both signals in the same frame (co-occurrence),
+                # check if voice was present in the frames immediately before tracking
+                # started. Voice within this window is close enough to be the wake word;
+                # voice only found further back in the lookback is stale/unrelated.
+                has_voice_proximity = False
                 if voice_frames_tracking == 0:
                     overlap_start = max(0, len(history) - num_tracking_frames - self.overlap_lookback_frames)
-                    overlap_window = history[overlap_start:]
-                    for f in overlap_window:
-                        if f['vad'] >= self.overlap_vad_min and f['wake'] >= self.overlap_wake_min:
-                            has_overlap = True
+                    overlap_end = max(0, len(history) - num_tracking_frames)
+                    pre_tracking_window = history[overlap_start:overlap_end]
+                    for f in pre_tracking_window:
+                        if f['vad'] >= self.overlap_vad_min:
+                            has_voice_proximity = True
                             break
                 else:
                     # Voice during tracking = direct temporal overlap
-                    has_overlap = True
+                    has_voice_proximity = True
                 
                 if not has_voice:
                     # No voice activity in tracking or recent history - reject as noise spike
@@ -508,11 +512,12 @@ class WakeWordDetector:
                     # Voice present but never peaked high enough - likely background speech not directed at device
                     # Skip on macOS: VAD timing desync causes false rejections with legitimate wake words
                     rejection_reason = f"WEAK_VOICE (peak={peak_score:.3f}, max_vad_tracking={max_vad_tracking:.2f}, max_vad_history={max_vad_history:.2f}, combined={max_vad_combined:.2f}<{vad_peak_required:.2f})"
-                elif not self.is_macos and voice_frames_tracking == 0 and not has_overlap:
-                    # Voice only in history with no sub-threshold overlap between VAD and wake signals.
-                    # The voice and wake events are temporally disjoint - the voice was unrelated.
+                elif not self.is_macos and voice_frames_tracking == 0 and not has_voice_proximity:
+                    # Voice only found in broad lookback history but NOT in the frames
+                    # immediately before tracking started. The voice was too long ago to
+                    # be the wake word utterance - likely unrelated speech or noise.
                     # Skip on macOS: VAD and wake model have ~300-500ms timing offset causing false rejections
-                    rejection_reason = f"STALE_VOICE (peak={peak_score:.3f}, no overlap vad>={self.overlap_vad_min}&wake>={self.overlap_wake_min}, voice only in history={voice_info})"
+                    rejection_reason = f"STALE_VOICE (peak={peak_score:.3f}, no voice in {self.overlap_lookback_frames}-frame pre-tracking window, voice only in history={voice_info})"
                 elif in_continuous_speech and peak_score < self.continuous_speech_peak:
                     # Wake word detected in middle of ongoing speech - require higher peak to confirm
                     # This reduces false positives from conversational speech
