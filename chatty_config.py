@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 import time
 from datetime import datetime
 
-CHATTY_FRIEND_VERSION_NUMBER = "0.1.15"
+CHATTY_FRIEND_VERSION_NUMBER = "0.1.16"
 
 def get_current_date_string(with_time=False):
 	return datetime.now().strftime("%Y-%m-%d" + (" %H:%M:%S" if with_time else ""))
@@ -16,17 +16,26 @@ def get_current_date_string(with_time=False):
 OPENAI_SESSION_HARD_LIMIT_SECONDS = 30*60
 
 voice_choices = {
+    "gpt-realtime-1.5":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar'],
     "gpt-realtime":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar'],
     "gpt-realtime-mini":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar']
 }
 
-# https://platform.openai.com/docs/pricing#audio-tokens Aug 28 2025
+# https://developers.openai.com/api/docs/pricing Mar 2026
 cost_sheet_per_million = {
+    "gpt-realtime-1.5": {
+        "per_input_text_token": 4.0,
+        "per_input_text_token_cached": 0.4,
+        "per_input_audio_token": 32.0,
+        "per_input_audio_token_cached": 0.4,
+        "per_output_text_token": 16,
+        "per_output_audio_token": 64
+    },
     "gpt-realtime": {
         "per_input_text_token": 4.0,
         "per_input_text_token_cached": 0.4,
         "per_input_audio_token": 32.0,
-        "per_input_audio_token_cached": 32.0,
+        "per_input_audio_token_cached": 0.4,
         "per_output_text_token": 16,
         "per_output_audio_token": 64
     },
