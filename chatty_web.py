@@ -1409,12 +1409,16 @@ else:  # we have wifi and authentication!
         st.warning("⚠️ Don't edit these settings unless you know what you're doing!")
         
         with st.form("ai_settings_form"):
-            from chatty_config import ConfigManager
+            from chatty_config import ConfigManager, voice_choices
             default_config = ConfigManager().default_config
             
-            realtime_model = st.text_input(
+            model_options = list(voice_choices.keys())
+            current_model = st.session_state.config_manager.get_config('REALTIME_MODEL') or default_config['REALTIME_MODEL']
+            current_index = model_options.index(current_model) if current_model in model_options else 0
+            realtime_model = st.selectbox(
                 "Realtime Model",
-                value=st.session_state.config_manager.get_config('REALTIME_MODEL') or default_config['REALTIME_MODEL'],
+                options=model_options,
+                index=current_index,
                 key="realtime_model"
             )
             
