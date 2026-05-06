@@ -19,6 +19,11 @@ from typing import Any
 import asyncio
 import time
 import os
+import subprocess
+import sys
+
+if sys.platform == "linux":
+    subprocess.run(["amixer", "sset", "Master", "100%"], capture_output=True)
 WAKE_UP_INSTRUCTIONS = "You are starting a new conversation."
 SUMMARY_INSTRUCTIONS = "You were talking to the user a few minutes ago."
 
