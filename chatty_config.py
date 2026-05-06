@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 import time
 from datetime import datetime
 
-CHATTY_FRIEND_VERSION_NUMBER = "0.1.16"
+CHATTY_FRIEND_VERSION_NUMBER = "0.1.17"
 
 def get_current_date_string(with_time=False):
 	return datetime.now().strftime("%Y-%m-%d" + (" %H:%M:%S" if with_time else ""))
@@ -237,6 +237,7 @@ important information about the user's living situation, mood, etc.
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {
     "REALTIME_MODEL" : "gpt-realtime-mini",
+    "AUDIO_TRANSCRIPTION_MODEL" : "gpt-4o-transcribe",
     "EMBEDDING_MODEL" : "text-embedding-3-small",
     "SUPERVISOR_MODEL" : "gpt-5-mini",
     "WS_URL" : 'wss://api.openai.com/v1/realtime?model=',
@@ -258,6 +259,10 @@ default_config = {
     # Near-miss chirp feedback
     "NEAR_MISS_COOLDOWN_SECONDS" : 5.0,   # Minimum seconds between near-miss chirps
     "NEAR_MISS_PEAK_RATIO" : 0.80,        # Chirp when peak >= this ratio of confirm threshold
+    # RMS energy floor: reject wake detections where peak frame RMS is below
+    # (ambient_ema + noise_injection) * factor. Catches wake model hallucinations
+    # on near-silence audio (score spikes with no actual speech energy).
+    "WAKE_RMS_ENERGY_FACTOR" : 1.5,
     # Auto-noise injection
     "NOISE_TARGET_FLOOR" : 120.0,         # Target ambient noise floor RMS
     "NOISE_MAX_INJECTION" : 85.0,         # Maximum synthetic noise to inject

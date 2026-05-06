@@ -88,7 +88,9 @@ def parse_outcome_from_log(log_text: str) -> tuple[str, Optional[str]]:
     # Check for rejection reasons
     rejection_patterns = [
         (r'REJECTED - (NO_VOICE)', 'NO_VOICE'),
+        (r'REJECTED - (LOW_ENERGY)', 'LOW_ENERGY'),
         (r'REJECTED - (WEAK_VOICE)', 'WEAK_VOICE'),
+        (r'REJECTED - (STALE_VOICE)', 'STALE_VOICE'),
         (r'REJECTED - (CONTINUOUS_SPEECH)', 'CONTINUOUS_SPEECH'),
         (r'REJECTED - peak=', 'LOW_SCORE'),
     ]
@@ -118,6 +120,7 @@ class SimulatorConfig:
     overlap_vad_min: float = 0.18
     overlap_wake_min: float = 0.05
     overlap_lookback_frames: int = 8
+    wake_rms_energy_factor: float = 1.5
     
     @classmethod
     def from_dict(cls, d: dict) -> 'SimulatorConfig':
@@ -136,6 +139,8 @@ class DetectionResult:
     max_vad_history: float = 0.0
     continuous_voice_ms: float = 0.0
     tracking_frames: int = 0
+    peak_rms: float = 0.0
+    rms_floor: float = 0.0
     details: str = ""
 
 
@@ -148,6 +153,8 @@ class WakeDetectionSimulator:
     
     def __init__(self, config: Optional[SimulatorConfig] = None):
         self.config = config or SimulatorConfig()
+        self.ambient_rms: float = 0.0
+        self.noise_injection: float = 0.0
         self.reset()
     
     def reset(self):
@@ -158,9 +165,11 @@ class WakeDetectionSimulator:
         self.tracking = False
         self.tracking_scores = []
         self.tracking_vad_scores = []
+        self.tracking_rms = []
         self.result: Optional[DetectionResult] = None
     
-    def process_frames(self, frames: list[dict], verbose: bool = False) -> DetectionResult:
+    def process_frames(self, frames: list[dict], verbose: bool = False,
+                       ambient_rms: float = 0.0, noise_injection: float = 0.0) -> DetectionResult:
         """
         Process a sequence of frames and return the detection result.
         
@@ -172,11 +181,14 @@ class WakeDetectionSimulator:
             DetectionResult with outcome and details
         """
         self.reset()
+        self.ambient_rms = ambient_rms
+        self.noise_injection = noise_injection
         last_result = None
         
         for i, frame in enumerate(frames):
             vad_score = frame['vad']
             wake_score = frame['wake']
+            rms = frame.get('rms', 0)
             
             # Update history buffers (like real detector does)
             is_voice = vad_score > self.config.vad_threshold
@@ -185,11 +197,11 @@ class WakeDetectionSimulator:
             self.frame_history.append({
                 'vad': vad_score,
                 'wake': wake_score,
-                'rms': frame.get('rms', 0),
+                'rms': rms,
             })
             
             # Run detection logic
-            result = self._evaluate_frame(wake_score, vad_score, verbose, i)
+            result = self._evaluate_frame(wake_score, vad_score, rms, verbose, i)
             
             if result is not None:
                 # If detected, return immediately (like real detector)
@@ -206,7 +218,7 @@ class WakeDetectionSimulator:
         # No trigger occurred
         return DetectionResult(outcome='no_trigger', details='Score never exceeded entry threshold')
     
-    def _evaluate_frame(self, wake_score: float, vad_score: float, 
+    def _evaluate_frame(self, wake_score: float, vad_score: float, rms: float,
                         verbose: bool, frame_idx: int) -> Optional[DetectionResult]:
         """Evaluate a single frame. Returns result if detection/rejection occurs."""
         
@@ -217,10 +229,11 @@ class WakeDetectionSimulator:
             # We're tracking a potential wake word
             self.tracking_scores.append(wake_score)
             self.tracking_vad_scores.append(vad_score)
+            self.tracking_rms.append(rms)
             
             if verbose:
                 print(f"  Frame {frame_idx}: tracking frame {len(self.tracking_scores)}, "
-                      f"score={wake_score:.3f}, vad={vad_score:.2f}, above_entry={above_entry}")
+                      f"score={wake_score:.3f}, vad={vad_score:.2f}, rms={rms:.0f}, above_entry={above_entry}")
             
             if not above_entry:
                 # Score dropped below entry - evaluate the cluster
@@ -232,9 +245,10 @@ class WakeDetectionSimulator:
                 self.tracking = True
                 self.tracking_scores = [wake_score]
                 self.tracking_vad_scores = [vad_score]
+                self.tracking_rms = [rms]
                 
                 if verbose:
-                    print(f"  Frame {frame_idx}: TRACKING START, score={wake_score:.3f}, vad={vad_score:.2f}")
+                    print(f"  Frame {frame_idx}: TRACKING START, score={wake_score:.3f}, vad={vad_score:.2f}, rms={rms:.0f}")
         
         return None
     
@@ -303,6 +317,12 @@ class WakeDetectionSimulator:
             # Voice during tracking = direct temporal overlap
             has_overlap = True
         
+        # RMS energy floor check
+        peak_frame_idx = self.tracking_scores.index(peak_score)
+        peak_rms = self.tracking_rms[peak_frame_idx] if peak_frame_idx < len(self.tracking_rms) else 0
+        rms_floor = (self.ambient_rms + self.noise_injection) * cfg.wake_rms_energy_factor
+        has_energy = peak_rms >= rms_floor
+        
         # Build result
         result = DetectionResult(
             outcome='reject',
@@ -313,12 +333,17 @@ class WakeDetectionSimulator:
             max_vad_history=max_vad_history,
             continuous_voice_ms=continuous_voice_before_ms,
             tracking_frames=len(self.tracking_scores),
+            peak_rms=peak_rms,
+            rms_floor=rms_floor,
         )
         
         # Apply detection logic
         if not has_voice:
             result.reason = 'NO_VOICE'
             result.details = f"peak={peak_score:.3f}, max_vad={max_vad_tracking:.2f}<{vad_threshold}"
+        elif not has_energy:
+            result.reason = 'LOW_ENERGY'
+            result.details = f"peak={peak_score:.3f}, peak_rms={peak_rms:.0f}<{rms_floor:.0f}"
         elif not has_strong_voice:
             result.reason = 'WEAK_VOICE'
             result.details = f"peak={peak_score:.3f}, max_vad_combined={max_vad_combined:.2f}<{vad_peak_required:.2f}"
@@ -347,6 +372,7 @@ class WakeDetectionSimulator:
         if verbose:
             print(f"  CLUSTER EVALUATED: {result.outcome} ({result.reason or 'detected'})")
             print(f"    peak={peak_score:.3f}, cumul={cumulative_score:.2f}, frames_above={frames_above}")
+            print(f"    peak_rms={peak_rms:.0f}, rms_floor={rms_floor:.0f} (ambient={self.ambient_rms:.0f}+noise={self.noise_injection:.0f})*{cfg.wake_rms_energy_factor}")
             print(f"    max_vad_tracking={max_vad_tracking:.2f}, max_vad_history={max_vad_history:.2f}")
             print(f"    continuous_voice={continuous_voice_before_ms:.0f}ms, in_continuous={in_continuous_speech}")
         
@@ -392,7 +418,11 @@ def run_test(test_case: dict, config: SimulatorConfig, verbose: bool = False) ->
     if not frames:
         return False, "No frames in test case"
     
-    result = simulator.process_frames(frames, verbose=verbose)
+    ambient_rms = test_case.get('ambient_rms', 0.0)
+    noise_injection = test_case.get('noise_injection', 0.0)
+    result = simulator.process_frames(frames, verbose=verbose,
+                                       ambient_rms=ambient_rms,
+                                       noise_injection=noise_injection)
     
     expected_outcome = test_case.get('expected_outcome', 'unknown')
     expected_reason = test_case.get('expected_reason')

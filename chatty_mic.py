@@ -135,6 +135,7 @@ class WakeWordDetector:
         self.tracking = False
         self.tracking_scores = []
         self.tracking_vad_scores = []  # Track VAD during detection for gating
+        self.tracking_rms = []         # Track RMS during detection for energy floor
         self.tracking_start_time = 0.0
         self.cooldown_remaining = 0
 
@@ -150,6 +151,9 @@ class WakeWordDetector:
         self.near_miss_cooldown_seconds = float(cfg.get_config("NEAR_MISS_COOLDOWN_SECONDS") or 5.0)
         self.last_near_miss_time = 0
         self.near_miss_chirp = False  # Flag consumed by mic_listener to emit tone
+        
+        # --- RMS energy floor: reject wake detections on near-silence frames
+        self.wake_rms_energy_factor = float(cfg.get_config("WAKE_RMS_ENERGY_FACTOR") or 1.5)
         
         # --- Continuous speech rejection thresholds
         # When wake word is detected in the middle of ongoing speech (not isolated utterance),
@@ -261,6 +265,7 @@ class WakeWordDetector:
             f"noise_max={noise_stats['max_injection']}, "
             f"cont_speech_max={self.continuous_speech_max_ms}ms, "
             f"cont_speech_peak={self.continuous_speech_peak}, "
+            f"rms_energy_factor={self.wake_rms_energy_factor}, "
             f"near_miss_ratio={self.near_miss_peak_ratio}, "
             f"near_miss_cooldown={self.near_miss_cooldown_seconds}s"
         )
@@ -396,7 +401,7 @@ class WakeWordDetector:
             return True, ", ".join(issues)
         return False, ""
 
-    def _evaluate_cluster_detection(self, max_score: float, vad_score: float, vad_threshold: float) -> bool:
+    def _evaluate_cluster_detection(self, max_score: float, vad_score: float, vad_threshold: float, raw_rms: float = 0.0) -> bool:
         """
         Cluster-based wake word detection with cumulative scoring and VAD gating.
         
@@ -414,6 +419,7 @@ class WakeWordDetector:
             # We're tracking a potential wake word
             self.tracking_scores.append(max_score)
             self.tracking_vad_scores.append(vad_score)
+            self.tracking_rms.append(raw_rms)
             
             # Log each frame while tracking for debugging
             trace("wake", f"tracking: frame={len(self.tracking_scores)}, score={max_score:.3f}, vad={vad_score:.2f}, above_entry={above_entry}")
@@ -505,9 +511,20 @@ class WakeWordDetector:
                     # Voice during tracking = direct temporal overlap
                     has_voice_proximity = True
                 
+                # RMS energy floor: the frame with the peak wake score must have
+                # acoustic energy meaningfully above the noise floor. If the peak
+                # wake frame is at ambient+injection level, the model hallucinated.
+                peak_frame_idx = self.tracking_scores.index(peak_score)
+                peak_rms = self.tracking_rms[peak_frame_idx] if peak_frame_idx < len(self.tracking_rms) else 0
+                noise_stats = self.noise_manager.get_stats()
+                rms_floor = (noise_stats['ambient_rms'] + noise_stats['noise_level']) * self.wake_rms_energy_factor
+                has_energy = peak_rms >= rms_floor
+                
                 if not has_voice:
                     # No voice activity in tracking or recent history - reject as noise spike
                     rejection_reason = f"NO_VOICE (peak={peak_score:.3f}, max_vad={max_vad_tracking:.2f}<{vad_threshold}, history_voice={voice_frames_history}/{vad_lookback})"
+                elif not has_energy:
+                    rejection_reason = f"LOW_ENERGY (peak={peak_score:.3f}, peak_rms={peak_rms:.0f}<{rms_floor:.0f} [{noise_stats['ambient_rms']:.0f}+{noise_stats['noise_level']:.0f}]*{self.wake_rms_energy_factor})"
                 elif not self.is_macos and not has_strong_voice:
                     # Voice present but never peaked high enough - likely background speech not directed at device
                     # Skip on macOS: VAD timing desync causes false rejections with legitimate wake words
@@ -562,6 +579,7 @@ class WakeWordDetector:
                 self.tracking = False
                 self.tracking_scores = []
                 self.tracking_vad_scores = []
+                self.tracking_rms = []
                 
                 if wake_detected:
                     self.cooldown_remaining = self.cooldown_frames
@@ -588,6 +606,7 @@ class WakeWordDetector:
                 self.tracking = True
                 self.tracking_scores = [max_score]
                 self.tracking_vad_scores = [vad_score]
+                self.tracking_rms = [raw_rms]
                 self.tracking_start_time = time.time()
                 trace("wake", f"TRACKING START - initial_score={max_score:.3f}, vad={vad_score:.2f}, entry_threshold={self.entry_threshold}")
         
@@ -700,7 +719,7 @@ class WakeWordDetector:
 
         # --- 7. Cluster-based detection with VAD gating
         self.near_miss_chirp = False  # Reset before evaluation; set by _evaluate if near miss
-        is_wake_word = self._evaluate_cluster_detection(max_score, vad_score, vad_threshold)
+        is_wake_word = self._evaluate_cluster_detection(max_score, vad_score, vad_threshold, raw_rms)
 
         return (is_voice, is_wake_word)
 
