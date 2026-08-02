@@ -34,13 +34,14 @@ async def send_to_assistant(ws, message):
         except Exception as e:
             print(f"Error sending websocket message: {e}")
             print(f"Message: {str(message)[:100]}...")
+            trace("ws", f"send failed type={message.get('type', 'unknown')}: {e}")
     else:
         print("❌ No websocket to send message")
 
     return False
 
 async def send_audio_to_assistant(ws, buffer):
-    await send_to_assistant(ws,{
+    return await send_to_assistant(ws,{
         "type": "input_audio_buffer.append",
         "audio": b64(buffer),
     })

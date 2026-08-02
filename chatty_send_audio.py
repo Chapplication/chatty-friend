@@ -2,6 +2,7 @@
 # Finley 2025
 
 import asyncio
+import time
 from chatty_async_manager import AsyncManager
 from chatty_dsp import upsample_audio_efficient, apply_simple_noise_gate
 import numpy as np
@@ -19,6 +20,8 @@ async def stream_to_assistant(manager: AsyncManager):
 
     have_not_sent_audio = True
     chunk_count = 0  # For rate-limited tracing
+    last_audio_send_time = None
+    burst_count = 0
 
     initial_buffers = []
     while not should_exit:
@@ -56,7 +59,20 @@ async def stream_to_assistant(manager: AsyncManager):
                             chunk_count += 1
                             continue
                         
-                        await send_audio_to_assistant(ws, upsampled_buffer)
+                        now = time.monotonic()
+                        is_new_burst = last_audio_send_time is None or now - last_audio_send_time > 0.5
+                        if is_new_burst:
+                            burst_count += 1
+                            trace(
+                                "audio_out",
+                                f"burst {burst_count} sending bytes={len(upsampled_buffer)} "
+                                f"ws_state={getattr(ws, 'state', 'unknown')}",
+                            )
+
+                        sent = await send_audio_to_assistant(ws, upsampled_buffer)
+                        last_audio_send_time = now
+                        if not sent:
+                            trace("audio_out", f"burst {burst_count} send failed")
                         chunk_count += 1
                         
                         # Rate-limited logging: log first chunk only
