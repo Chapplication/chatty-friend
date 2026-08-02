@@ -17,6 +17,18 @@ import jinja2
 async def send_to_assistant(ws, message):
     if ws:
         try:
+            message_type = message.get("type", "")
+            if message_type == "response.cancel":
+                trace("rtctl", f"send response.cancel response={message.get('response_id', '<current>')}")
+            elif message_type == "conversation.item.truncate":
+                trace(
+                    "rtctl",
+                    f"send item.truncate item={message.get('item_id', '')[:8]} "
+                    f"audio_end_ms={message.get('audio_end_ms')}",
+                )
+            elif message_type == "response.create":
+                trace("rtctl", "send response.create")
+
             await ws.send(json.dumps(message))
             return True
         except Exception as e:
@@ -265,10 +277,22 @@ async def assistant_session_cancel_audio(master_state):
     """ cancels audio that is streaming in if the user interrupts """
 
     if not master_state.remote_assistant_state:
+        trace("rtctl", "cancel skipped: no remote assistant state")
         return
-    item_ids = master_state.remote_assistant_state.get("streaming_audio_item_ids")
+    item_ids = list(master_state.remote_assistant_state.get("streaming_audio_item_ids") or [])
     if not master_state.ws or not item_ids:
+        trace(
+            "rtctl",
+            f"cancel skipped: ws={bool(master_state.ws)} streaming_items={len(item_ids)} "
+            f"active_response={str(master_state.remote_assistant_state.get('active_response_id', ''))[:8]}",
+        )
         return
+
+    trace(
+        "rtctl",
+        f"cancel requested: streaming_items={[item_id[:8] for item_id in item_ids]} "
+        f"active_response={str(master_state.remote_assistant_state.get('active_response_id', ''))[:8]}",
+    )
 
     # tell the assistant to stop speaking; pending audio will be discarded
     for item_id in item_ids:
@@ -289,6 +313,16 @@ async def assistant_session_cancel_audio(master_state):
 
 async def on_assistant_response_done(event, master_state):
     """ Digest events to collect usage and estimate costs. """
+    response = event.get("response", {})
+    response_id = response.get("id", "")
+    status = response.get("status", "unknown")
+    status_details = response.get("status_details")
+    trace(
+        "rtlife",
+        f"response.done id={response_id[:8]} status={status} details={status_details}",
+    )
+    if master_state.remote_assistant_state.get("active_response_id") == response_id:
+        master_state.remote_assistant_state["active_response_id"] = None
 
     try:
         usage = event.get("response",{}).get("usage",{})
@@ -321,6 +355,12 @@ async def on_assistant_response_done(event, master_state):
 async def on_transcript_event(event, master_state):
     """ Track the transcript of the conversation. """
     event_type = event["type"]
+    trace(
+        "rtlife",
+        f"{event_type} item={str(event.get('item_id', ''))[:8]} "
+        f"response={str(event.get('response_id', ''))[:8]} "
+        f"chars={len(event.get('transcript', ''))}",
+    )
     if event_type == 'response.output_audio_transcript.done':
         await master_state.add_to_transcript("AI", event['transcript'])
     elif event_type == 'conversation.item.input_audio_transcription.completed':
@@ -349,12 +389,20 @@ async def on_assistant_audio(event, master_state):
             master_state.remote_assistant_state["streaming_audio_item_ids"] = []
         if event["item_id"] not in master_state.remote_assistant_state["streaming_audio_item_ids"]:
             master_state.remote_assistant_state["streaming_audio_item_ids"].append(event["item_id"])
-            trace("ws", f"audio stream started item={event['item_id'][:8]}...")
+            trace(
+                "rtlife",
+                f"audio started response={str(event.get('response_id', ''))[:8]} "
+                f"item={event['item_id'][:8]}",
+            )
         await master_state.task_managers["speaker"].input_q.put(event["delta"])
     elif "streaming_audio_item_ids" in master_state.remote_assistant_state:
         if event["item_id"] in master_state.remote_assistant_state["streaming_audio_item_ids"]:
             master_state.remote_assistant_state["streaming_audio_item_ids"].remove(event["item_id"])
-            trace("ws", f"audio stream ended item={event['item_id'][:8]}...")
+            trace(
+                "rtlife",
+                f"audio done response={str(event.get('response_id', ''))[:8]} "
+                f"item={event['item_id'][:8]}",
+            )
 
 async def on_function_call_arguments_done(event, master_state):
     """ receive and dispatch tool calls """
@@ -390,7 +438,14 @@ async def on_function_call_arguments_done(event, master_state):
 async def on_speech_started(event, master_state):
     """Handle server VAD detecting user speech - stop speaker to allow interruption."""
     from chatty_config import ASSISTANT_STOP_SPEAKING
-    
+
+    trace(
+        "rtlife",
+        f"speech_started item={str(event.get('item_id', ''))[:8]} "
+        f"audio_start_ms={event.get('audio_start_ms')} "
+        f"active_response={str(master_state.remote_assistant_state.get('active_response_id', ''))[:8]}",
+    )
+
     # Cancel any in-progress audio on the server side
     await assistant_session_cancel_audio(master_state)
     
@@ -398,7 +453,37 @@ async def on_speech_started(event, master_state):
     if "speaker" in master_state.task_managers:
         await master_state.task_managers["speaker"].command_q.put(ASSISTANT_STOP_SPEAKING)
 
+async def on_speech_stopped(event, master_state):
+    """Trace server VAD turn completion and automatic response timing."""
+    trace(
+        "rtlife",
+        f"speech_stopped item={str(event.get('item_id', ''))[:8]} "
+        f"audio_end_ms={event.get('audio_end_ms')} "
+        f"active_response={str(master_state.remote_assistant_state.get('active_response_id', ''))[:8]}",
+    )
+
+async def on_response_created(event, master_state):
+    """Track which response is active so interruption races are visible."""
+    response = event.get("response", {})
+    response_id = response.get("id", "")
+    previous_response_id = master_state.remote_assistant_state.get("active_response_id")
+    master_state.remote_assistant_state["active_response_id"] = response_id
+    trace(
+        "rtlife",
+        f"response.created id={response_id[:8]} status={response.get('status', 'unknown')} "
+        f"previous={str(previous_response_id or '')[:8]}",
+    )
+
+async def on_transcription_failed(event, master_state):
+    """Trace failed sidecar transcriptions without exposing conversation text."""
+    trace(
+        "rtlife",
+        f"input transcription failed item={str(event.get('item_id', ''))[:8]} "
+        f"error={event.get('error')}",
+    )
+
 assistant_event_handlers = {
+    "response.created": on_response_created,
     "response.output_audio.delta": on_assistant_audio,
     "response.output_audio.done": on_assistant_audio,
     "error": on_assistant_error,
@@ -407,6 +492,8 @@ assistant_event_handlers = {
     "response.output_audio_transcript.done": on_transcript_event,
     "response.function_call_arguments.done": on_function_call_arguments_done,
     "input_audio_buffer.speech_started": on_speech_started,
+    "input_audio_buffer.speech_stopped": on_speech_stopped,
+    "conversation.item.input_audio_transcription.failed": on_transcription_failed,
 }
 
 async def on_assistant_input_event(event_raw, master_state):

@@ -29,6 +29,7 @@ async def speaker_player(manager: AsyncManager) -> None:
     speaker_stream = None
     unused_buffer = None
     last_cancel_time = None
+    discarded_after_cancel_count = 0
 
     def _speaker_callback(in_data, frame_count, time_info, status):
         """ Implement the PyAudio callback protocol."""
@@ -136,8 +137,14 @@ async def speaker_player(manager: AsyncManager) -> None:
                         manager.output_q.put_nowait(chatty_tone_buffer(event))
                         speaker_stream = prepare_to_speak(speaker_stream)
                     elif event == ASSISTANT_STOP_SPEAKING:
-                        trace("spkr", "interrupted by user - clearing queue")
+                        queued_buffers = manager.output_q.qsize()
+                        trace(
+                            "spkr",
+                            f"interrupted by user - clearing queue queued={queued_buffers} "
+                            f"unused_buffer={unused_buffer is not None}",
+                        )
                         last_cancel_time = time.time()
+                        discarded_after_cancel_count = 0
                         speaker_stream = stop_speaker_stream(speaker_stream)
                         # clear the output queue
                         while not manager.output_q.empty():
@@ -151,7 +158,16 @@ async def speaker_player(manager: AsyncManager) -> None:
 
                     # catch buffers incoming after a user cancel but before response stops
                     if last_cancel_time and time.time() - last_cancel_time < 0.5:
+                        discarded_after_cancel_count += 1
+                        if discarded_after_cancel_count == 1:
+                            trace("spkr", "discarding post-cancel audio during 500ms suppression window")
                         continue
+                    if discarded_after_cancel_count:
+                        trace(
+                            "spkr",
+                            f"post-cancel suppression ended; discarded_buffers={discarded_after_cancel_count}",
+                        )
+                        discarded_after_cancel_count = 0
                     last_cancel_time = None
 
                     event_buffer = base64.b64decode(event)
