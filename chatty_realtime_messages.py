@@ -11,6 +11,15 @@ from chatty_debug import trace
 import time
 import asyncio
 import jinja2
+
+def get_local_turn_context(master_state):
+    """Return compact local-turn timing context for Realtime lifecycle traces."""
+    diagnostics = getattr(master_state, "audio_diagnostics", {})
+    local_turn_id = diagnostics.get("latest_local_turn_id") or "none"
+    started = diagnostics.get("local_turn_started_monotonic")
+    age_ms = (time.monotonic() - started) * 1000 if started is not None else -1
+    return local_turn_id, age_ms
+
 #
 #  OUTGOING MESSAGES TO ASSISTANT
 #
@@ -214,11 +223,31 @@ async def setup_assistant_session(master_state, greet_user: str = None):
             }
         }
 
+        turn_detection = session_update_message["session"]["audio"]["input"]["turn_detection"]
+        trace(
+            "rtcfg",
+            f"request model={master_state.conman.get_config('REALTIME_MODEL')} "
+            f"transcription={master_state.conman.get_config('AUDIO_TRANSCRIPTION_MODEL')} "
+            f"turn_type={turn_detection.get('type')} threshold={turn_detection.get('threshold')} "
+            f"silence_ms={turn_detection.get('silence_duration_ms')} "
+            f"prefix_ms={turn_detection.get('prefix_padding_ms')} "
+            f"local_gate={master_state.conman.get_config('LOCAL_VAD_GATE')} "
+            f"local_threshold={master_state.conman.get_config('VAD_THRESHOLD')} "
+            f"local_wait_s={master_state.conman.get_config('SECONDS_TO_WAIT_FOR_MORE_VOICE')}",
+        )
+
         # Configure session
         if await send_to_assistant(ws, session_update_message):
             response = await wait_for_remote_ack(ws, "session.updated")
 
             print("✅ session.updated")
+            accepted_turn_detection = (
+                response.get("session", {})
+                .get("audio", {})
+                .get("input", {})
+                .get("turn_detection")
+            )
+            trace("rtcfg", f"accepted turn_detection={accepted_turn_detection}")
             trace("ws", "session updated - ready for audio")
 
             master_state.ws = ws
@@ -356,11 +385,14 @@ async def on_assistant_response_done(event, master_state):
 async def on_transcript_event(event, master_state):
     """ Track the transcript of the conversation. """
     event_type = event["type"]
+    transcript = event.get("transcript", "")
+    local_turn_id, local_age_ms = get_local_turn_context(master_state)
     trace(
         "rtlife",
         f"{event_type} item={str(event.get('item_id', ''))[:8]} "
         f"response={str(event.get('response_id', ''))[:8]} "
-        f"chars={len(event.get('transcript', ''))}",
+        f"local={local_turn_id} local_age_ms={local_age_ms:.0f} "
+        f"chars={len(transcript)} text={transcript[:240]!r}",
     )
     if event_type == 'response.output_audio_transcript.done':
         await master_state.add_to_transcript("AI", event['transcript'])
@@ -427,7 +459,11 @@ async def on_function_call_arguments_done(event, master_state):
     try:
         call_id = event.get("call_id", "")
         func_name = event.get("name", "unknown")
-        trace("tool", f"calling {func_name}")
+        arguments = event.get("arguments", "{}")
+        trace(
+            "tool",
+            f"calling {func_name} call={call_id[:8]} arguments={arguments[:240]}",
+        )
         await send_function_call_result(await dispatch_tool_call(event, master_state), call_id)
         trace("tool", f"completed {func_name}")
             
@@ -440,10 +476,12 @@ async def on_speech_started(event, master_state):
     """Handle server VAD detecting user speech - stop speaker to allow interruption."""
     from chatty_config import ASSISTANT_STOP_SPEAKING
 
+    local_turn_id, local_age_ms = get_local_turn_context(master_state)
     trace(
         "rtlife",
         f"speech_started item={str(event.get('item_id', ''))[:8]} "
         f"audio_start_ms={event.get('audio_start_ms')} "
+        f"local={local_turn_id} local_age_ms={local_age_ms:.0f} "
         f"active_response={str(master_state.remote_assistant_state.get('active_response_id', ''))[:8]}",
     )
 
@@ -456,10 +494,12 @@ async def on_speech_started(event, master_state):
 
 async def on_speech_stopped(event, master_state):
     """Trace server VAD turn completion and automatic response timing."""
+    local_turn_id, local_age_ms = get_local_turn_context(master_state)
     trace(
         "rtlife",
         f"speech_stopped item={str(event.get('item_id', ''))[:8]} "
         f"audio_end_ms={event.get('audio_end_ms')} "
+        f"local={local_turn_id} local_age_ms={local_age_ms:.0f} "
         f"active_response={str(master_state.remote_assistant_state.get('active_response_id', ''))[:8]}",
     )
 
@@ -469,9 +509,11 @@ async def on_response_created(event, master_state):
     response_id = response.get("id", "")
     previous_response_id = master_state.remote_assistant_state.get("active_response_id")
     master_state.remote_assistant_state["active_response_id"] = response_id
+    local_turn_id, local_age_ms = get_local_turn_context(master_state)
     trace(
         "rtlife",
         f"response.created id={response_id[:8]} status={response.get('status', 'unknown')} "
+        f"local={local_turn_id} local_age_ms={local_age_ms:.0f} "
         f"previous={str(previous_response_id or '')[:8]}",
     )
 

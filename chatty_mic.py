@@ -116,6 +116,8 @@ class WakeWordDetector:
         self.model = None
         self.master_state = master_state
         cfg = master_state.conman
+        self.last_vad_score = 0.0
+        self.last_raw_rms = 0.0
 
         # Audio characteristics: 80ms frames at 16kHz -> 1280 samples per call
         self.sample_rate = 16000
@@ -609,6 +611,8 @@ class WakeWordDetector:
         if self.model is None:
             rms = self.calculate_signal_strength(audio_16ints)
             is_voice = rms > 500.0  # simple fallback heuristic
+            self.last_vad_score = 1.0 if is_voice else 0.0
+            self.last_raw_rms = rms
             return (is_voice, False)
 
         # --- 1. Get VAD score on raw audio first (before noise injection)
@@ -625,6 +629,8 @@ class WakeWordDetector:
 
         # --- 2. Calculate raw RMS (for auto-noise tracking)
         raw_rms = self.calculate_signal_strength(audio_16ints)
+        self.last_vad_score = vad_score
+        self.last_raw_rms = raw_rms
 
         # --- 3. Update noise manager, get injection level
         noise_level = self.noise_manager.update(raw_rms, vad_score)
@@ -711,10 +717,27 @@ async def mic_listener(manager: AsyncManager) -> None:
     """
 
     loop = asyncio.get_running_loop()
+    mic_dropped_frames = 0
+
+    def _enqueue_mic_input(in_data):
+        nonlocal mic_dropped_frames
+        try:
+            manager.input_q.put_nowait(in_data)
+        except asyncio.QueueFull:
+            mic_dropped_frames += 1
+            if mic_dropped_frames == 1 or mic_dropped_frames % 25 == 0:
+                trace(
+                    "mic",
+                    f"INPUT QUEUE FULL dropped_frames={mic_dropped_frames} "
+                    f"queue={manager.input_q.qsize()}/{manager.input_q.maxsize}",
+                )
+
     def _mic_input_callback(in_data, frame_count, time_info, status):
         # PyAudio calling back with audio. Just add to the mic listener queue
         try:
-            loop.call_soon_threadsafe(manager.input_q.put_nowait, in_data)
+            if status:
+                loop.call_soon_threadsafe(trace, "mic", f"PyAudio callback status={status}")
+            loop.call_soon_threadsafe(_enqueue_mic_input, in_data)
         except Exception as e:
             print(f"Mic callback error: {e}")
         
@@ -747,6 +770,12 @@ async def mic_listener(manager: AsyncManager) -> None:
     preroll_frame_count = int(manager.master_state.conman.get_config("LOCAL_VAD_PREROLL_FRAMES") or 5)
     preroll_buffer = deque(maxlen=preroll_frame_count)  # Circular buffer for speech onset capture
     was_voice_active = False  # Track voice state transitions for pre-roll flush
+    local_turn_sequence = 0
+    local_turn_stats = None
+    manager.master_state.audio_diagnostics = {
+        "latest_local_turn_id": None,
+        "local_turn_started_monotonic": None,
+    }
     
     if local_vad_gate_enabled:
         trace("mic", f"Local VAD gating enabled with {preroll_frame_count} frame pre-roll buffer")
@@ -816,10 +845,14 @@ async def mic_listener(manager: AsyncManager) -> None:
                     # if we are currently not sending to the assistant, also check for wake word.
                     if wake_detector:
                         is_voice, is_wake_word = wake_detector.on_audio_buffer_in(event, vad_only=mic_is_live_to_assistant)
+                        vad_score = wake_detector.last_vad_score
+                        raw_rms = wake_detector.last_raw_rms
                     else:
                         # No wake detector - always-on mode, always consider voice active
                         is_voice = True
                         is_wake_word = False
+                        vad_score = 1.0
+                        raw_rms = float(np.sqrt(np.mean(event.astype(np.float64) ** 2)))
 
                     if not mic_is_live_to_assistant:
                         if is_wake_word:
@@ -853,6 +886,8 @@ async def mic_listener(manager: AsyncManager) -> None:
                         # we are asleep
                         continue
 
+                    raw_is_voice = is_voice
+
                     # we are live... debounce voice activity for UI events only
                     if is_voice:
                         last_voice_activity_time = time.time()
@@ -868,15 +903,53 @@ async def mic_listener(manager: AsyncManager) -> None:
                         if is_voice:
                             # Voice detected - check if this is a new voice onset
                             if not was_voice_active:
+                                local_turn_sequence += 1
+                                local_turn_id = f"L{local_turn_sequence:04d}"
+                                local_turn_stats = {
+                                    "id": local_turn_id,
+                                    "started": time.monotonic(),
+                                    "gated_frames": 0,
+                                    "raw_voice_frames": 0,
+                                    "max_vad": vad_score,
+                                    "max_rms": raw_rms,
+                                }
+                                manager.master_state.audio_diagnostics.update({
+                                    "latest_local_turn_id": local_turn_id,
+                                    "local_turn_started_monotonic": local_turn_stats["started"],
+                                })
                                 # Flush pre-roll buffer to capture speech onset
+                                flushed_preroll_frames = len(preroll_buffer)
                                 for preroll_frame in preroll_buffer:
                                     await manager.output_q.put(preroll_frame)
                                 preroll_buffer.clear()
                                 was_voice_active = True
-                                trace("mic", f"Voice onset - flushed {preroll_frame_count} pre-roll frames")
+                                trace(
+                                    "micturn",
+                                    f"{local_turn_id} START vad={vad_score:.3f} rms={raw_rms:.0f} "
+                                    f"preroll={flushed_preroll_frames} output_q={manager.output_q.qsize()}",
+                                )
+                            if local_turn_stats:
+                                local_turn_stats["gated_frames"] += 1
+                                local_turn_stats["raw_voice_frames"] += int(raw_is_voice)
+                                local_turn_stats["max_vad"] = max(local_turn_stats["max_vad"], vad_score)
+                                local_turn_stats["max_rms"] = max(local_turn_stats["max_rms"], raw_rms)
                             # Send current frame
                             await manager.output_q.put(event)
                         else:
+                            if was_voice_active and local_turn_stats:
+                                duration_ms = (time.monotonic() - local_turn_stats["started"]) * 1000
+                                tail_frames = local_turn_stats["gated_frames"] - local_turn_stats["raw_voice_frames"]
+                                trace(
+                                    "micturn",
+                                    f"{local_turn_stats['id']} END wall_ms={duration_ms:.0f} "
+                                    f"gated_frames={local_turn_stats['gated_frames']} "
+                                    f"raw_voice_frames={local_turn_stats['raw_voice_frames']} "
+                                    f"tail_frames={tail_frames} max_vad={local_turn_stats['max_vad']:.3f} "
+                                    f"max_rms={local_turn_stats['max_rms']:.0f} "
+                                    f"output_q={manager.output_q.qsize()} mic_input_q={manager.input_q.qsize()} "
+                                    f"mic_dropped={mic_dropped_frames}",
+                                )
+                                local_turn_stats = None
                             # No voice - just buffer for potential pre-roll
                             preroll_buffer.append(event)
                             was_voice_active = False
