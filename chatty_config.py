@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any
 import time
 from datetime import datetime
 
-CHATTY_FRIEND_VERSION_NUMBER = "0.1.18"
+CHATTY_FRIEND_VERSION_NUMBER = "0.1.19"
 
 def get_current_date_string(with_time=False):
 	return datetime.now().strftime("%Y-%m-%d" + (" %H:%M:%S" if with_time else ""))
@@ -16,13 +16,31 @@ def get_current_date_string(with_time=False):
 OPENAI_SESSION_HARD_LIMIT_SECONDS = 30*60
 
 voice_choices = {
+    "gpt-realtime-2.1":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar'],
+    "gpt-realtime-2.1-mini":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar'],
     "gpt-realtime-1.5":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar'],
     "gpt-realtime":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar'],
     "gpt-realtime-mini":['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse','marin','cedar']
 }
 
-# https://developers.openai.com/api/docs/pricing Mar 2026
+# https://developers.openai.com/api/docs/pricing Aug 2026
 cost_sheet_per_million = {
+    "gpt-realtime-2.1": {
+        "per_input_text_token": 4.0,
+        "per_input_text_token_cached": 0.4,
+        "per_input_audio_token": 32.0,
+        "per_input_audio_token_cached": 0.4,
+        "per_output_text_token": 24,
+        "per_output_audio_token": 64
+    },
+    "gpt-realtime-2.1-mini": {
+        "per_input_text_token": 0.6,
+        "per_input_text_token_cached": 0.06,
+        "per_input_audio_token": 10.0,
+        "per_input_audio_token_cached": 0.3,
+        "per_output_text_token": 2.4,
+        "per_output_audio_token": 20.0
+    },
     "gpt-realtime-1.5": {
         "per_input_text_token": 4.0,
         "per_input_text_token_cached": 0.4,
@@ -236,7 +254,7 @@ important information about the user's living situation, mood, etc.
 
 # DEFAULTS THAT ARE USER EDITABLE
 default_config = {
-    "REALTIME_MODEL" : "gpt-realtime-mini",
+    "REALTIME_MODEL" : "gpt-realtime-2.1-mini",
     "AUDIO_TRANSCRIPTION_MODEL" : "gpt-4o-transcribe",
     "EMBEDDING_MODEL" : "text-embedding-3-small",
     "SUPERVISOR_MODEL" : "gpt-5-mini",
